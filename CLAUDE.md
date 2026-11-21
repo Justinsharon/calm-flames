@@ -35,6 +35,8 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
 12. ~~Stale reservations never expire.~~ Fixed in Phase 3b (`src/server/reservationExpiry.ts`;
     `POST /api/admin/maintenance/expire-reservations` or `npm run expire-reservations`).
     **Phase 4:** schedule it (Cloud Scheduler, see `docs/reservation-expiry.md`).
+    Phase 3c: the same sweep expires abandoned Razorpay `PAYMENT_PENDING` orders (`src/server/orderExpiry.ts`)
+    after checking Razorpay; late payments on `EXPIRED` orders go to `RECONCILIATION_REQUIRED` (`PAID_AFTER_EXPIRY`).
 
 ## Phases
 - **Phase 1 — Foundations:** fix npm install; migrate server to firebase-admin; add Firestore emulator
