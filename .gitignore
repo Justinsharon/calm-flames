@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Service-account keys and emulator output
+*service-account*.json
+firebase-debug.log
+firestore-debug.log
