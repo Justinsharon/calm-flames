@@ -14,7 +14,27 @@ export async function clearFirestore() {
 
 export const realFetch: typeof fetch = globalThis.fetch.bind(globalThis);
 
+/**
+ * Test fixture: a priced, active product document in the EMULATOR (never real data).
+ * Order creation and reservation read prices from Firestore `products`.
+ */
+export const TEST_PRICE = 500;
+export async function seedPricedProduct(price = TEST_PRICE) {
+  await getAdminDb().collection('products').doc(PRODUCT).set({
+    id: PRODUCT,
+    slug: PRODUCT,
+    name: 'Test Jumbo Tealight',
+    price,
+    priceStatus: 'active',
+    isActive: true,
+    isHistorical: false,
+    categories: [],
+    moods: [],
+  });
+}
+
 export async function seedInventory(available: number, reserved = 0) {
+  await seedPricedProduct();
   await getAdminDb().collection('inventory').doc(PRODUCT).set({
     productId: PRODUCT,
     quantity: available + reserved,

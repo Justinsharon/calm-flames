@@ -3,15 +3,14 @@
  *
  * Real: firebase-admin, Firestore transactions, the Express routes (via supertest).
  * Mocked: the Razorpay HTTP API (global fetch is stubbed for api.razorpay.com only).
- * Test-only: one product is given an in-memory price for the duration of this file so the order
- * route can be exercised; no catalogue data is changed.
+ * Test-only: one priced product document is seeded in the EMULATOR (helpers.seedPricedProduct) so
+ * the order route can be exercised; no real catalogue data is involved.
  * Interleavings are forced with one-shot test hooks (src/server/testHooks.ts).
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import crypto from 'crypto';
 import request from 'supertest';
 import { app } from '../../../server';
-import { ACTIVE_CANONICAL_CATALOG_MAP } from '../../data/canonicalCatalog';
 import { getAdminDb } from '../../server/firestoreAdmin';
 import { setTestHook, clearTestHooks } from '../../server/testHooks';
 import {
@@ -26,10 +25,10 @@ import {
   idempDocIdFor,
   STALE_TIME,
   jsonResponse,
+  TEST_PRICE,
 } from './helpers';
 
 const WEBHOOK_SECRET = 'whsec_emulator_test';
-const TEST_PRICE = 500; // test-only in-memory price
 const EXPECTED_PAISE = (TEST_PRICE + 99) * 100; // + standard shipping below free-shipping threshold
 
 const customer = {
@@ -52,15 +51,8 @@ const defaultRzpHandler: RzpHandler = (url) => {
   return jsonResponse({ error: 'unexpected' }, 500);
 };
 
-const original = { price: 0, priceStatus: '' as any };
-
 beforeAll(() => {
   expect(process.env.FIRESTORE_EMULATOR_HOST, 'run via npm run test:emulator').toBeTruthy();
-  const p = ACTIVE_CANONICAL_CATALOG_MAP[PRODUCT] as any;
-  original.price = p.price;
-  original.priceStatus = p.priceStatus;
-  p.price = TEST_PRICE;
-  p.priceStatus = 'active';
   vi.stubGlobal('fetch', async (input: any, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.url;
     if (url.startsWith('https://api.razorpay.com/')) {
@@ -72,9 +64,6 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  const p = ACTIVE_CANONICAL_CATALOG_MAP[PRODUCT] as any;
-  p.price = original.price;
-  p.priceStatus = original.priceStatus;
   vi.unstubAllGlobals();
 });
 

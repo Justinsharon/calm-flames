@@ -5,7 +5,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { getAdminDb, doc, runTransaction, type TransactionLike } from './firestoreAdmin';
 import type { InventoryReservationRecord } from '../types';
-import { ACTIVE_CANONICAL_CATALOG_MAP } from '../data/canonicalCatalog';
+import { hasVerifiedPrice, isActiveProduct } from '../lib/productMapping';
 import type { InventoryRecord } from '../services/dbService';
 
 /**
@@ -59,15 +59,6 @@ export async function reserveInventoryTransaction(
     }
 
     const prodId = item.productId.trim();
-
-    // Validate product ID exists in the active canonical catalogue
-    const activeProduct = ACTIVE_CANONICAL_CATALOG_MAP[prodId];
-    if (!activeProduct || activeProduct.isActive === false || activeProduct.isHistorical) {
-      return {
-        success: false,
-        error: `Product "${prodId}" is not available in the active canonical catalogue.`
-      };
-    }
 
     if (
       typeof item.quantity !== 'number' ||
@@ -132,6 +123,29 @@ export async function reserveInventoryTransaction(
           return { success: true, reservationId: resId, reservedItems: existingData.items };
         }
         return { success: false, error: `Reservation ${resId} is already in state ${existingData.status}.` };
+      }
+
+      // 0c. Re-check every product against Firestore `products` inside the transaction, so a
+      // product deactivated or un-priced by an admin mid-checkout cannot be reserved.
+      const productDocs = new Map<string, any>();
+      for (const prodId of aggregatedMap.keys()) {
+        const prodSnap = await transaction.get(doc(db, 'products', prodId));
+        const prod = prodSnap.exists() ? prodSnap.data() : undefined;
+        if (!prod || !isActiveProduct(prod)) {
+          return {
+            success: false,
+            error: `Product "${prodId}" is not available in the active catalogue.`
+          };
+        }
+        productDocs.set(prodId, prod);
+      }
+      for (const [prodId, prod] of productDocs) {
+        if (!hasVerifiedPrice(prod)) {
+          return {
+            success: false,
+            error: `Product "${prodId}" does not have a verified retail price.`
+          };
+        }
       }
 
       // 1. Read all authoritative inventory documents for unique products

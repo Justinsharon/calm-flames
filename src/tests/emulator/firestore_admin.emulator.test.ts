@@ -13,11 +13,12 @@ import {
   fetchInventory,
 } from '../../server/inventoryService';
 import { app } from '../../../server';
-import { clearFirestore } from './helpers';
+import { clearFirestore, seedPricedProduct } from './helpers';
 
 const PRODUCT = 'jumbo-tealight-mogra';
 
 async function seedInventory(quantity: number) {
+  await seedPricedProduct(); // reservations now re-check the product in Firestore
   await getAdminDb().collection('inventory').doc(PRODUCT).set({
     productId: PRODUCT,
     quantity,
