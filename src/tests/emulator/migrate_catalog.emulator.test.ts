@@ -6,6 +6,7 @@ import path from 'path';
 import { migrateCatalog } from '../../../scripts/catalog/migrate';
 import { getAdminDb, getAdminBucket } from '../../server/firestoreAdmin';
 import { clearFirestore, realFetch } from './helpers';
+import { CANONICAL_PRODUCTS, HISTORICAL_PRODUCTS } from '../../../scripts/catalog/canonicalCatalog';
 
 const imagesDir = path.resolve(__dirname, '../../assets/images');
 
@@ -100,6 +101,27 @@ describe('catalogue migration (Firestore + Storage emulators)', () => {
       imageUrl: 'https://example.com/owner-photo.jpg'
     });
     expect((await db.collection('inventory').doc('peony-bloom').get()).data()).toMatchObject({ availableQuantity: 7 });
+  });
+
+  it('sets sortOrder from the original catalogue position, only when missing', async () => {
+    const db = getAdminDb();
+    // Legacy doc (old seeding) without sortOrder, and one with an owner-chosen order
+    await db.collection('products').doc('royal-urli').set({ name: 'Royal Urli', price: 0, isActive: true });
+    await db.collection('products').doc('peony-bloom').set({ name: 'Peony Bloom', price: 0, isActive: true, sortOrder: 1 });
+    await run();
+
+    const all = (await db.collection('products').get()).docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+    const order = all.filter((d) => d.id !== 'peony-bloom').sort((a, b) => a.sortOrder - b.sortOrder).map((d) => d.id);
+    const expected = [...CANONICAL_PRODUCTS, ...HISTORICAL_PRODUCTS].map((p) => p.id).filter((id) => id !== 'peony-bloom');
+    expect(order).toEqual(expected);
+    expect(all.find((d) => d.id === 'royal-urli').sortOrder).toBe(CANONICAL_PRODUCTS.findIndex((p) => p.id === 'royal-urli'));
+    expect(all.find((d) => d.id === 'peony-bloom').sortOrder).toBe(1); // owner order kept
+
+    // Owner reorders after migration; a re-run never overrides it
+    await db.collection('products').doc('royal-urli').update({ sortOrder: 0 });
+    await run();
+    expect((await db.collection('products').doc('royal-urli').get()).data()!.sortOrder).toBe(0);
+    expect((await db.collection('products').doc('peony-bloom').get()).data()!.sortOrder).toBe(1);
   });
 
   it('fills missing fields on legacy docs without inventing a price status', async () => {

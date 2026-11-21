@@ -59,6 +59,7 @@ export async function updateProductCommercials(
   };
   if (typeof u.name === 'string' && u.name.trim()) updates.name = u.name.trim();
   if (typeof u.tagline === 'string') updates.tagline = u.tagline;
+  if (typeof u.sortOrder === 'number') updates.sortOrder = u.sortOrder;
   await updateDoc(doc(db, 'products', productId), updates);
 }
 

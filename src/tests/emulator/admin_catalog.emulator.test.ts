@@ -15,6 +15,7 @@ import {
   subscribeAllProducts
 } from '../../services/adminCatalogService';
 import { productFromDoc } from '../../lib/productMapping';
+import { sortProducts } from '../../context/CatalogContext';
 import { getAdminDb } from '../../server/firestoreAdmin';
 import { buildProductDoc } from '../../../scripts/catalog/migrate';
 import { CANONICAL_PRODUCTS, HISTORICAL_PRODUCTS } from '../../../scripts/catalog/canonicalCatalog';
@@ -85,6 +86,28 @@ describe('admin catalogue editing (emulators + security rules)', () => {
     const hidden = waitFor(storefrontPeony, (p) => p === null);
     await updateProductCommercials('peony-bloom', { price: 799, priceStatus: 'active', isActive: false }, admin);
     await hidden; // deactivated product disappears from the storefront query
+  });
+
+  it('sort order edit reorders the signed-out storefront in realtime', async () => {
+    const admin = clientFor(ADMIN);
+    const visitor = clientFor();
+    const storefrontOrder = (cb: (ids: string[]) => void) =>
+      onSnapshot(query(collection(visitor.db, 'products'), where('isActive', '==', true)), (snap) =>
+        cb(sortProducts(snap.docs.map((d) => productFromDoc(d.id, d.data()))).map((p) => p.id))
+      );
+    const initial = await waitFor(storefrontOrder, (ids) => ids.length === 33);
+    expect(initial[0]).toBe(CANONICAL_PRODUCTS[0].id);
+    expect(initial).not.toEqual([...initial].sort()); // catalogue order, not alphabetical
+
+    const moved = waitFor(storefrontOrder, (ids) => ids[0] === 'ganpati-bappa-hamper');
+    await updateProductCommercials('ganpati-bappa-hamper', { price: 0, priceStatus: 'missing', isActive: true, sortOrder: 0 }, admin);
+    // tie on 0 is broken by name: "Ganpati…" sorts before "Jumbo…"
+    expect((await moved)[0]).toBe('ganpati-bappa-hamper');
+    expect((await getAdminDb().collection('products').doc('ganpati-bappa-hamper').get()).data()!.sortOrder).toBe(0);
+
+    await expect(
+      updateProductCommercials('peony-bloom', { price: 0, priceStatus: 'missing', isActive: true, sortOrder: -1 }, admin)
+    ).rejects.toThrow(/Sort order/);
   });
 
   it('refuses to mark a product priced without a positive price (nothing written)', async () => {

@@ -8,6 +8,8 @@ export interface CommercialUpdate {
   isActive: boolean;
   name?: string;
   tagline?: string;
+  /** Storefront position (lower first). */
+  sortOrder?: number;
 }
 
 /** Validate an admin price edit. Returns an error message, or null when valid. */
@@ -20,6 +22,9 @@ export function validateCommercialUpdate(u: CommercialUpdate): string | null {
   }
   if (u.priceStatus === 'active' && u.price <= 0) {
     return 'A product can only be marked priced (active) with a price above ₹0.';
+  }
+  if (u.sortOrder !== undefined && (!Number.isInteger(u.sortOrder) || u.sortOrder < 0 || u.sortOrder > 100000)) {
+    return 'Sort order must be a whole number between 0 and 100000.';
   }
   return null;
 }

@@ -103,7 +103,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
     price: 0,
     priceStatus: 'missing' as 'active' | 'missing',
     isActive: true,
-    stock: 0
+    stock: 0,
+    sortOrder: 0
   });
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
@@ -152,7 +153,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
       price: prod.price,
       priceStatus: prod.priceStatus === 'active' ? 'active' : 'missing',
       isActive: prod.isActive === true,
-      stock: typeof invRecord?.availableQuantity === 'number' ? invRecord.availableQuantity : prod.availableStock ?? 0
+      stock: typeof invRecord?.availableQuantity === 'number' ? invRecord.availableQuantity : prod.availableStock ?? 0,
+      sortOrder: prod.sortOrder ?? 0
     });
     setPhotoFile(null);
     setEditError(null);
@@ -229,7 +231,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
       tagline: editForm.tagline,
       price: Number(editForm.price),
       priceStatus: editForm.priceStatus,
-      isActive: editForm.isActive
+      isActive: editForm.isActive,
+      sortOrder: Number(editForm.sortOrder)
     };
     const problem =
       validateCommercialUpdate(commercial) ||
@@ -659,6 +662,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                             step="1"
                             value={editForm.stock}
                             onChange={(e) => setEditForm({ ...editForm, stock: Number(e.target.value) })}
+                            className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-[#79716B] mb-1">Sort Order (lower shows first)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="1"
+                            value={editForm.sortOrder}
+                            onChange={(e) => setEditForm({ ...editForm, sortOrder: Number(e.target.value) })}
                             className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
                           />
                         </div>
