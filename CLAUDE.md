@@ -29,6 +29,10 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
    orphaned mapping `setDoc` outside a transaction (~L556); unfenced fallback `updateDoc` (~L570, ~L575).
 9. 6 tests time out hitting live Firestore; concurrency tests assert validation, not final DB state.
 10. Admin email hard-coded in `src/context/AuthContext.tsx`.
+11. **Must fix before Phase 4:** `/api/payments/verify` writes order status (`updateDoc`) without the
+    claim/lease check, so it can race the webhook and overwrite a CANCELLED order.
+12. **Must fix before Phase 4:** inventory reservations left behind by crashed workers never expire
+    (nothing releases a RESERVED reservation whose order was never persisted).
 
 ## Phases
 - **Phase 1 — Foundations:** fix npm install; migrate server to firebase-admin; add Firestore emulator
