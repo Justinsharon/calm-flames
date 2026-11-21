@@ -10,25 +10,30 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Admin role lives ONLY on the user's Firestore document (customers/{uid}.role == 'admin'),
+    // set with `npm run grant-admin -- <email>`. No hard-coded emails.
     function isAdmin() {
-      return isSignedIn() && (
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        request.auth.token.email == 'justinsharon56@gmail.com'
-      );
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/customers/$(request.auth.uid)).data.get('role', 'customer') == 'admin';
+    }
+
+    // A product write may never make an unpriced product buyable: 'active' needs a price > 0.
+    function isValidProduct(d) {
+      return d.price is number && d.price >= 0
+        && d.priceStatus in ['active', 'missing']
+        && (d.priceStatus != 'active' || d.price > 0)
+        && d.isActive is bool;
     }
 
     match /{document=**} {
       allow read, write: if false;
     }
 
-    match /admins/{adminId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
-    }
-
+    // Catalogue: anyone can read ACTIVE products; only admins can read inactive ones or write.
     match /products/{productId} {
-      allow read: if (resource == null || resource.data.isActive == true) || isAdmin();
-      allow write: if isAdmin();
+      allow read: if resource == null || resource.data.isActive == true || isAdmin();
+      allow create, update: if isAdmin() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /inventory/{productId} {

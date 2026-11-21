@@ -11,7 +11,7 @@ import { app } from '../../../server';
 import { reserveInventoryTransaction } from '../../server/inventoryService';
 import { getAdminDb } from '../../server/firestoreAdmin';
 import { buildProductDoc } from '../../../scripts/catalog/migrate';
-import { CANONICAL_PRODUCTS, HISTORICAL_PRODUCTS } from '../../data/canonicalCatalog';
+import { CANONICAL_PRODUCTS, HISTORICAL_PRODUCTS } from '../../../scripts/catalog/canonicalCatalog';
 import { clearFirestore } from './helpers';
 
 async function seedCatalogue() {

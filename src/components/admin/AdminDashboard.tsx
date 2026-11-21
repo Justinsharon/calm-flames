@@ -33,7 +33,6 @@ import {
   fetchInventory,
   fetchOrders,
   updateOrderStatus,
-  seedInitialCatalogIfNeeded,
   InventoryRecord
 } from '../../services/dbService';
 import { reviewsService, ProductReview } from '../../services/reviewsService';
@@ -284,13 +283,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
     }
   };
 
-  const handleSeedData = async () => {
-    if (confirm('Re-seed initial catalog products & default coupons to Firestore?')) {
-      await seedInitialCatalogIfNeeded();
-      loadAdminData();
-      setFeedback('Catalog and coupons seeded successfully.');
-      setTimeout(() => setFeedback(null), 3000);
-    }
+  // Products update in realtime; this refreshes orders, inventory and reviews.
+  const handleRefreshData = async () => {
+    await loadAdminData();
+    setFeedback('Orders, inventory and reviews refreshed.');
+    setTimeout(() => setFeedback(null), 3000);
   };
 
   return (
@@ -311,8 +308,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
 
             <div className="flex items-center gap-2">
               <button
-                onClick={handleSeedData}
-                title="Sync/Seed Catalog"
+                onClick={handleRefreshData}
+                title="Refresh orders, inventory & reviews"
                 className="p-1.5 text-stone-300 hover:text-white rounded-lg hover:bg-stone-800 transition-colors"
               >
                 <RefreshCw className="w-4 h-4" />

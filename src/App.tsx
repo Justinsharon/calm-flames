@@ -28,7 +28,6 @@ import { PolicyModals, PolicyModalType } from './components/modals/PolicyModals'
 import { Footer } from './components/footer/Footer';
 import { Product, BrandCategoryKey, OrderRecord } from './types';
 import { CatalogProvider, useCatalog } from './context/CatalogContext';
-import { seedInitialCatalogIfNeeded } from './services/dbService';
 import { testFirestoreConnection } from './lib/firebase';
 import { Heart, Sparkles } from 'lucide-react';
 
@@ -48,10 +47,10 @@ const MainContent: React.FC = () => {
   const { user, setIsAccountOpen } = useAuth();
   const { products, getProductById } = useCatalog();
 
-  // Test connection and auto-seed initial catalog if needed
+  // Test connection (the catalogue is loaded by CatalogProvider; seeding is admin-only via
+  // scripts/migrate-catalog.ts, never on visitor load)
   useEffect(() => {
     testFirestoreConnection();
-    seedInitialCatalogIfNeeded();
   }, []);
 
   const handleNavigateSection = (sectionId: string) => {

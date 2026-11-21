@@ -17,16 +17,17 @@ import {
 import { productFromDoc } from '../../lib/productMapping';
 import { getAdminDb } from '../../server/firestoreAdmin';
 import { buildProductDoc } from '../../../scripts/catalog/migrate';
-import { CANONICAL_PRODUCTS, HISTORICAL_PRODUCTS } from '../../data/canonicalCatalog';
+import { CANONICAL_PRODUCTS, HISTORICAL_PRODUCTS } from '../../../scripts/catalog/canonicalCatalog';
 import { clearFirestore, realFetch } from './helpers';
 import { clientFor, deleteClientApps } from './clientApps';
 
 const ADMIN = { uid: 'admin-uid', email: 'owner@example.com', admin: true };
 const CUSTOMER = { uid: 'customer-uid', email: 'buyer@example.com' };
 
+// What `npm run grant-admin` does: Firestore role (for firestore.rules + the app) and, via the
+// mock token above, the `admin` claim (for storage.rules).
 async function makeAdmin(uid: string) {
   await getAdminDb().collection('customers').doc(uid).set({ role: 'admin', email: ADMIN.email });
-  await getAdminDb().collection('admins').doc(uid).set({ email: ADMIN.email });
 }
 
 async function seed() {

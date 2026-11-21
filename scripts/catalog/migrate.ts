@@ -19,7 +19,7 @@ import {
   CANONICAL_PRODUCTS,
   HISTORICAL_PRODUCTS,
   type CanonicalProduct
-} from '../../src/data/canonicalCatalog';
+} from './canonicalCatalog';
 import { PRODUCT_IMAGE_FILES } from './productImages';
 import { stripUndefined, type ProductDoc } from '../../src/lib/productMapping';
 
