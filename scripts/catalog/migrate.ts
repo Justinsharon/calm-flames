@@ -99,9 +99,11 @@ async function ensureImage(
 export function buildProductDoc(
   cp: CanonicalProduct,
   images: { url: string; storagePath: string }[],
-  now: string
+  now: string,
+  sortOrder: number
 ): ProductDoc {
   return stripUndefined({
+    sortOrder,
     id: cp.id,
     slug: cp.slug,
     name: cp.name,
@@ -168,9 +170,9 @@ export async function migrateCatalog(opts: MigrationOptions): Promise<MigrationR
 
   // 2. Products + inventory
   const now = new Date().toISOString();
-  for (const cp of all) {
+  for (const [index, cp] of all.entries()) {
     const images = (PRODUCT_IMAGE_FILES[cp.id] || []).map((f) => urlByFile.get(f)!);
-    const desired = buildProductDoc(cp, images, now);
+    const desired = buildProductDoc(cp, images, now, index);
     const productRef = opts.db.collection('products').doc(cp.id);
     const inventoryRef = opts.db.collection('inventory').doc(cp.id);
 

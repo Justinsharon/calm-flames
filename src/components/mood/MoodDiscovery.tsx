@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { MOOD_DISCOVERY_ITEMS } from '../../data/products';
+import { MOOD_DISCOVERY_ITEMS } from '../../data/siteContent';
+import { useCatalog } from '../../context/CatalogContext';
 import { MoodKey, Product } from '../../types';
 import { getRecommendationForMood } from '../../services/recommendationEngine';
 import { Sparkles, ArrowRight, Clock, ShieldCheck, Flame, ShoppingBag } from 'lucide-react';
@@ -13,7 +14,8 @@ export const MoodDiscovery: React.FC<MoodDiscoveryProps> = ({ onSelectProduct })
   const [selectedMood, setSelectedMood] = useState<MoodKey>('calm');
   const { addToCart } = useCart();
 
-  const { product, reason } = getRecommendationForMood(selectedMood);
+  const { products, loading, error } = useCatalog();
+  const { product, reason } = getRecommendationForMood(products, selectedMood);
   const currentMoodItem = MOOD_DISCOVERY_ITEMS.find((m) => m.id === selectedMood) || MOOD_DISCOVERY_ITEMS[3];
 
   return (
@@ -76,6 +78,11 @@ export const MoodDiscovery: React.FC<MoodDiscoveryProps> = ({ onSelectProduct })
 
         {/* Personalized Interactive Recommendation Panel */}
         <div className="bg-[#FAF7F2] border border-[#E5DCCE] rounded-3xl p-6 sm:p-8 md:p-10 shadow-sm transition-all duration-500">
+          {!product ? (
+            <p className="text-xs text-[#79716B] text-center py-10">
+              {loading ? 'Loading the collection…' : error || 'The collection is being prepared. Please check back soon.'}
+            </p>
+          ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
             {/* Left: Product Image & Quick Preview */}
             <div className="lg:col-span-5 relative">
@@ -176,6 +183,7 @@ export const MoodDiscovery: React.FC<MoodDiscoveryProps> = ({ onSelectProduct })
               </div>
             </div>
           </div>
+          )}
         </div>
       </div>
     </section>

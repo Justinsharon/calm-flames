@@ -27,7 +27,7 @@ import { RitualClub } from './components/newsletter/RitualClub';
 import { PolicyModals, PolicyModalType } from './components/modals/PolicyModals';
 import { Footer } from './components/footer/Footer';
 import { Product, BrandCategoryKey, OrderRecord } from './types';
-import { PRODUCTS } from './data/products';
+import { CatalogProvider, useCatalog } from './context/CatalogContext';
 import { seedInitialCatalogIfNeeded } from './services/dbService';
 import { testFirestoreConnection } from './lib/firebase';
 import { Heart, Sparkles } from 'lucide-react';
@@ -46,6 +46,7 @@ const MainContent: React.FC = () => {
   const { isCheckoutOpen, setIsCheckoutOpen } = useCart();
   const { lastFeedback, setIsWishlistOpen } = useWishlist();
   const { user, setIsAccountOpen } = useAuth();
+  const { products, getProductById } = useCatalog();
 
   // Test connection and auto-seed initial catalog if needed
   useEffect(() => {
@@ -118,7 +119,7 @@ const MainContent: React.FC = () => {
 
         {/* Phase 3: Section 6 - Personalized Homepage for Authenticated Customers */}
         <PersonalizedWelcome
-          products={PRODUCTS}
+          products={products}
           onSelectProduct={(p) => setSelectedProduct(p)}
           onOpenAccount={() => setIsAccountOpen(true)}
           onOpenDiscovery={() => setIsDiscoveryOpen(true)}
@@ -195,7 +196,7 @@ const MainContent: React.FC = () => {
         isOpen={isAssistantOpen}
         onClose={() => setIsAssistantOpen(false)}
         onSelectProductById={(productId) => {
-          const found = PRODUCTS.find((p) => p.id === productId);
+          const found = getProductById(productId);
           if (found) setSelectedProduct(found);
         }}
       />
@@ -204,7 +205,7 @@ const MainContent: React.FC = () => {
       <ProductCompareModal
         isOpen={isCompareOpen}
         onClose={() => setIsCompareOpen(false)}
-        products={PRODUCTS}
+        products={products}
         onSelectProduct={(p) => setSelectedProduct(p)}
       />
 
@@ -212,7 +213,7 @@ const MainContent: React.FC = () => {
       <SmartGiftFinderModal
         isOpen={isGiftFinderOpen}
         onClose={() => setIsGiftFinderOpen(false)}
-        products={PRODUCTS}
+        products={products}
         onSelectProduct={(p) => setSelectedProduct(p)}
       />
 
@@ -277,11 +278,13 @@ const MainContent: React.FC = () => {
 export default function App() {
   return (
     <AuthProvider>
-      <CartProvider>
-        <WishlistProvider>
-          <MainContent />
-        </WishlistProvider>
-      </CartProvider>
+      <CatalogProvider>
+        <CartProvider>
+          <WishlistProvider>
+            <MainContent />
+          </WishlistProvider>
+        </CartProvider>
+      </CatalogProvider>
     </AuthProvider>
   );
 }

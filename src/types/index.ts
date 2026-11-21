@@ -114,6 +114,7 @@ export interface Product {
   categories: BrandCategoryKey[];
   moods: MoodKey[];
   matchReasons?: Record<string, string>;
+  sortOrder?: number;
 }
 
 export interface BrandCategoryItem {

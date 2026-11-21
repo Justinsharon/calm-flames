@@ -11,6 +11,8 @@ export interface ProductDoc {
   slug: string;
   name: string;
   sku?: string;
+  /** Display order in the storefront (lower first). */
+  sortOrder?: number;
   tagline?: string;
   price: number;
   originalPrice?: number;
@@ -108,7 +110,8 @@ export function productFromDoc(id: string, d: Record<string, any>): Product {
     isHistorical: Boolean(d.isHistorical),
     categories: Array.isArray(d.categories) ? d.categories : [],
     moods: Array.isArray(d.moods) ? d.moods : [],
-    matchReasons: d.matchReasons || {}
+    matchReasons: d.matchReasons || {},
+    sortOrder: typeof d.sortOrder === 'number' ? d.sortOrder : undefined
   };
 }
 

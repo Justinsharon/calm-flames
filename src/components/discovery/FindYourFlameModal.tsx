@@ -3,6 +3,7 @@ import { X, Sparkles, ArrowRight, RotateCcw, Flame, Check, ShoppingBag } from 'l
 import { Product } from '../../types';
 import { getRecommendationFromQuiz } from '../../services/recommendationEngine';
 import { useCart } from '../../context/CartContext';
+import { useCatalog } from '../../context/CatalogContext';
 import confetti from 'canvas-confetti';
 
 interface FindYourFlameModalProps {
@@ -121,8 +122,9 @@ export const FindYourFlameModal: React.FC<FindYourFlameModalProps> = ({
     setIsCompleted(false);
   };
 
+  const { products, loading: catalogLoading } = useCatalog();
   const result = isCompleted
-    ? getRecommendationFromQuiz(answers)
+    ? getRecommendationFromQuiz(products, answers)
     : null;
 
   return (
@@ -214,7 +216,9 @@ export const FindYourFlameModal: React.FC<FindYourFlameModalProps> = ({
             </div>
           ) : (
             /* Result Screen */
-            result && (
+            !result ? (
+              <p className="text-xs text-[#79716B] text-center py-10">{catalogLoading ? 'Loading the collection…' : 'The collection is being prepared. Please check back soon.'}</p>
+            ) : (
               <div className="space-y-6 animate-in fade-in duration-300">
                 <div className="text-center space-y-1">
                   <span className="text-xs uppercase tracking-widest text-[#D18D4D] font-semibold">

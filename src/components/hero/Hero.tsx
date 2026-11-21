@@ -6,7 +6,7 @@ import {
   jumboTealightsImg,
   royalUrliImg,
   modakCandlesImg
-} from '../../data/products';
+} from '../../data/siteContent';
 
 interface HeroProps {
   onOpenDiscovery: () => void;

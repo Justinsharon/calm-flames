@@ -1,4 +1,4 @@
-import { PRODUCTS, MOOD_DISCOVERY_ITEMS, BRAND_CATEGORIES } from '../data/products';
+import { MOOD_DISCOVERY_ITEMS, BRAND_CATEGORIES } from '../data/siteContent';
 import { Product, MoodKey, BrandCategoryKey, CandleRitual } from '../types';
 
 export interface QuizRecommendationResult {
@@ -21,14 +21,18 @@ const DEFAULT_RITUAL: CandleRitual = {
 };
 
 /**
- * Recommends an authentic product from the catalog based on the selected mood
+ * Recommends an authentic product from the live catalogue based on the selected mood.
+ * `product` is undefined only while the catalogue is empty / loading.
  */
-export function getRecommendationForMood(moodId: MoodKey): { product: Product; reason: string } {
+export function getRecommendationForMood(
+  products: Product[],
+  moodId: MoodKey
+): { product: Product | undefined; reason: string } {
   const moodItem = MOOD_DISCOVERY_ITEMS.find((m) => m.id === moodId) || MOOD_DISCOVERY_ITEMS[0];
-  const product = PRODUCTS.find((p) => p.id === moodItem.recommendedProductId) || PRODUCTS[0];
+  const product = products.find((p) => p.id === moodItem.recommendedProductId) || products[0];
 
   const reason =
-    product.matchReasons?.[moodId] ||
+    product?.matchReasons?.[moodId] ||
     moodItem.personalizedMessage ||
     `Specially blended to accompany your ${moodItem.label.toLowerCase()} moments.`;
 
@@ -42,12 +46,15 @@ export function getRecommendationForMood(moodId: MoodKey): { product: Product; r
  * Quiz Discovery Algorithm matching user emotional state, moment, scent, and intensity
  * Grounded in the real catalogue
  */
-export function getRecommendationFromQuiz(answers: {
-  feeling: string;
-  moment: string;
-  scentPreference: string;
-  intensity: string;
-}): QuizRecommendationResult {
+export function getRecommendationFromQuiz(
+  products: Product[],
+  answers: {
+    feeling: string;
+    moment: string;
+    scentPreference: string;
+    intensity: string;
+  }
+): QuizRecommendationResult | null {
   const { feeling, moment, scentPreference, intensity } = answers;
 
   // Real candidate products
@@ -118,8 +125,9 @@ export function getRecommendationFromQuiz(answers: {
   const primaryId = sortedIds[0] || 'rose-wax-sachet';
   const secondaryId = sortedIds[1];
 
-  const primary = PRODUCTS.find((p) => p.id === primaryId) || PRODUCTS[0];
-  const secondary = PRODUCTS.find((p) => p.id === secondaryId);
+  const primary = products.find((p) => p.id === primaryId) || products[0];
+  const secondary = products.find((p) => p.id === secondaryId);
+  if (!primary) return null; // catalogue not loaded yet
 
   // Craft bespoke human reason based on verified catalogue attributes
   let matchReason = `You are seeking a moment of ${feeling.toLowerCase()} for your ${moment.toLowerCase()}. `;
@@ -138,12 +146,11 @@ export function getRecommendationFromQuiz(answers: {
 }
 
 /**
- * Filter products by one of the 6 Brand Categories
+ * Filter live products by one of the Brand Categories. Mood / scent categories cover every
+ * live product; filter categories use the curated ID lists in siteContent.
  */
-export function getProductsByCategory(categoryKey: BrandCategoryKey): Product[] {
+export function getProductsByCategory(products: Product[], categoryKey: BrandCategoryKey): Product[] {
   const categoryItem = BRAND_CATEGORIES.find((c) => c.id === categoryKey);
-  if (!categoryItem) return PRODUCTS;
-
-  // Filter products by associated IDs
-  return PRODUCTS.filter((p) => categoryItem.associatedProductIds.includes(p.id));
+  if (!categoryItem || categoryItem.actionType === 'mood' || categoryItem.actionType === 'scent') return products;
+  return products.filter((p) => categoryItem.associatedProductIds.includes(p.id));
 }

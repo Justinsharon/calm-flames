@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sparkles, Leaf, Flame, ShieldCheck, Heart, ArrowRight } from 'lucide-react';
-import { HERO_ASSET } from '../../data/products';
+import { HERO_ASSET } from '../../data/siteContent';
 
 interface BrandStoryProps {
   onOpenStoryModal?: () => void;
