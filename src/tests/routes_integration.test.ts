@@ -7,7 +7,7 @@ import {
   CANONICAL_PRODUCTS,
   HISTORICAL_PRODUCTS
 } from '../data/canonicalCatalog';
-import { reserveInventoryTransaction } from '../services/dbService';
+import { reserveInventoryTransaction } from '../server/inventoryService';
 
 describe('Route-Level Backend Integration & Production-Safety Test Suite', () => {
   const originalEnv = process.env;
@@ -710,21 +710,21 @@ describe('Route-Level Backend Integration & Production-Safety Test Suite', () =>
   // =========================================================================
   describe('12. Inventory Invariants (Consume & Release)', () => {
     it('releaseInventoryReservation must fail safely when reservation record does not exist', async () => {
-      const { releaseInventoryReservation } = await import('../services/dbService');
+      const { releaseInventoryReservation } = await import('../server/inventoryService');
       const result = await releaseInventoryReservation('res_nonexistent_999999');
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/does not exist|storage|failed|permission/i);
     });
 
     it('consumeInventoryReservation must fail safely when reservation record does not exist', async () => {
-      const { consumeInventoryReservation } = await import('../services/dbService');
+      const { consumeInventoryReservation } = await import('../server/inventoryService');
       const result = await consumeInventoryReservation('res_nonexistent_999999');
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/does not exist|storage|failed|permission/i);
     });
 
     it('consumeInventoryReservation must reject empty or non-string reservation ID', async () => {
-      const { consumeInventoryReservation } = await import('../services/dbService');
+      const { consumeInventoryReservation } = await import('../server/inventoryService');
       // @ts-ignore
       const result = await consumeInventoryReservation('');
       expect(result.success).toBe(false);
@@ -732,7 +732,7 @@ describe('Route-Level Backend Integration & Production-Safety Test Suite', () =>
     });
 
     it('releaseInventoryReservation must reject missing reservation ID', async () => {
-      const { releaseInventoryReservation } = await import('../services/dbService');
+      const { releaseInventoryReservation } = await import('../server/inventoryService');
       // @ts-ignore
       const result = await releaseInventoryReservation(undefined);
       expect(result.success).toBe(false);
@@ -1037,7 +1037,7 @@ describe('Route-Level Backend Integration & Production-Safety Test Suite', () =>
     }
 
     it('reserveInventoryTransaction must fail with WORKER_FENCED_OFF when fence claim fails', async () => {
-      const { reserveInventoryTransaction } = await import('../services/dbService');
+      const { reserveInventoryTransaction } = await import('../server/inventoryService');
       const result = await reserveInventoryTransaction(
         [{ productId: 'jumbo-tealight-mogra', quantity: 1 }],
         'res_fence_test_123',

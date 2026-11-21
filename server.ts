@@ -16,7 +16,8 @@ import {
   releaseInventoryReservation,
   consumeInventoryReservation,
   fetchInventory
-} from './src/services/dbService';
+} from './src/server/inventoryService';
+import { getAdminDb, doc, getDoc, setDoc, updateDoc, runTransaction } from './src/server/firestoreAdmin';
 
 dotenv.config();
 
@@ -71,7 +72,7 @@ app.get('/api/checkout/readiness', async (_req: Request, res: Response) => {
   let databaseAvailable = false;
   let inventoryConfigured = false;
   try {
-    const { db } = await import('./src/lib/firebase');
+    const db = getAdminDb();
     databaseAvailable = Boolean(db);
     // Verify inventory collection access or structure
     const invRecords = await fetchInventory();
@@ -339,8 +340,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
       .digest('hex');
 
     // 4. ATOMIC IDEMPOTENCY CLAIM VIA FIRESTORE TRANSACTION WITH ABANDONED CLAIM RECOVERY
-    const { db } = await import('./src/lib/firebase');
-    const { runTransaction, doc, getDoc, setDoc, updateDoc } = await import('firebase/firestore');
+    const db = getAdminDb();
     const idempDocRef = doc(db, 'orderIdempotency', idempDocId);
 
     const initialClaimToken = crypto.randomUUID();
@@ -886,8 +886,7 @@ app.post('/api/payments/verify', async (req: Request, res: Response) => {
     let storedOrder: any = null;
     let orderDocRef: any = null;
     try {
-      const { db } = await import('./src/lib/firebase');
-      const { doc, getDoc } = await import('firebase/firestore');
+      const db = getAdminDb();
       orderDocRef = doc(db, 'orders', order_number);
       const snap = await getDoc(orderDocRef);
       if (snap.exists()) {
@@ -1018,7 +1017,6 @@ app.post('/api/payments/verify', async (req: Request, res: Response) => {
       const consumeResult = await consumeInventoryReservation(resId);
       if (!consumeResult.success) {
         try {
-          const { updateDoc } = await import('firebase/firestore');
           await updateDoc(orderDocRef, {
             status: 'RECONCILIATION_REQUIRED',
             paymentStatus: 'PAID',
@@ -1038,7 +1036,6 @@ app.post('/api/payments/verify', async (req: Request, res: Response) => {
     // 12. Update order status in durable storage to PAID / CONFIRMED
     try {
       if (orderDocRef) {
-        const { updateDoc } = await import('firebase/firestore');
         await updateDoc(orderDocRef, {
           paymentStatus: 'PAID',
           status: 'CONFIRMED',
@@ -1261,8 +1258,7 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
     const workerLeaseToken = crypto.randomUUID();
 
     try {
-      const { db } = await import('./src/lib/firebase');
-      const { runTransaction, doc, getDoc, updateDoc } = await import('firebase/firestore');
+      const db = getAdminDb();
 
       const txResult = await runTransaction(db, async (transaction) => {
         const eventDocRef = doc(db, 'razorpayEvents', eventId);
