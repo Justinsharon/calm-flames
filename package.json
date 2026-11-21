@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:emulator": "firebase emulators:exec --only firestore,storage --project demo-calm-flames \"vitest run --config vitest.emulator.config.ts\"",
     "migrate:catalog": "tsx scripts/migrate-catalog.ts",
-    "grant-admin": "tsx scripts/grant-admin.ts"
+    "grant-admin": "tsx scripts/grant-admin.ts",
+    "expire-reservations": "tsx scripts/expire-reservations.ts"
   },
   "dependencies": {
     "@google/genai": "^2.27.0",

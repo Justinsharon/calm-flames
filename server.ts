@@ -8,12 +8,15 @@ import { getActiveCatalog, getProductsByIds } from './src/server/catalogService'
 import { hasVerifiedPrice } from './src/lib/productMapping';
 import {
   reserveInventoryTransaction,
-  consumeInventoryReservation,
   fetchInventory,
   planReservationRelease
 } from './src/server/inventoryService';
 import { runTestHook } from './src/server/testHooks';
-import { getAdminDb, doc, getDoc, updateDoc, runTransaction } from './src/server/firestoreAdmin';
+import { confirmOrderPaymentFromVerify, type VerifyTransitionOutcome } from './src/server/orderTransitions';
+import { expireStaleReservations, resolveMaxAgeMinutes } from './src/server/reservationExpiry';
+import { getAuth as getAdminAuth } from 'firebase-admin/auth';
+import { getAdminApp } from './src/server/firestoreAdmin';
+import { getAdminDb, doc, getDoc, runTransaction } from './src/server/firestoreAdmin';
 
 dotenv.config();
 
@@ -681,7 +684,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
 
     const reservedItems = reservationResult.reservedItems || [];
 
-    await runTestHook('order.afterReserve', { orderNumber: claimedOrderNumber, idempDocId });
+    await runTestHook('order.afterReserve', { orderNumber: claimedOrderNumber, idempDocId, reservationId: claimedReservationId });
 
     // 6. Persist initial order record and update idempotency status in ONE fenced Firestore transaction
     try {
@@ -697,6 +700,13 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
           idempData.status !== 'CREATING'
         ) {
           throw new Error('WORKER_FENCED_OFF: Idempotency claim was reclaimed or updated by another worker.');
+        }
+
+        // The reservation must still be held. The stale-reservation sweeper may have released it
+        // (it only releases reservations with no order, so this check and the sweeper serialize).
+        const resSnap = await tx.get(doc(db, 'inventoryReservations', claimedReservationId));
+        if (!resSnap.exists() || resSnap.data().status !== 'RESERVED') {
+          throw new Error('RESERVATION_NOT_HELD: Inventory reservation expired or was released before the order was saved.');
         }
 
         tx.set(orderDocRef, {
@@ -732,6 +742,16 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
         await failAttemptFenced({ allowedStatuses: [], release: true, idempUpdates: {} });
         return res.status(409).json({
           error: 'Worker was fenced off. Attempt was reclaimed by a newer worker.'
+        });
+      }
+      if (orderPersistErr?.message?.includes('RESERVATION_NOT_HELD')) {
+        await failAttemptFenced({
+          allowedStatuses: ['CREATING'],
+          release: true,
+          idempUpdates: { status: 'FAILED', error: 'Inventory reservation expired before the order was saved.' }
+        });
+        return res.status(409).json({
+          error: 'Your items were held too long and have been released. Please start checkout again.'
         });
       }
       // The persist may have committed despite the error, so accept CREATING or RESERVED.
@@ -1125,48 +1145,42 @@ app.post('/api/payments/verify', async (req: Request, res: Response) => {
       });
     }
 
-    // 11. Consume inventory reservation durably
-    const resId = storedOrder.reservationId || storedOrder.reservationToken;
-    if (resId) {
-      const consumeResult = await consumeInventoryReservation(resId);
-      if (!consumeResult.success) {
-        try {
-          await updateDoc(orderDocRef, {
-            status: 'RECONCILIATION_REQUIRED',
-            paymentStatus: 'PAID',
-            reconciliationReason: 'INVENTORY_CONSUMPTION_FAILED',
-            razorpayPaymentId: razorpay_payment_id,
-            updatedAt: new Date().toISOString()
-          });
-        } catch (recErr) {}
-        return res.status(500).json({
-          verified: false,
-          status: 'RECONCILIATION_REQUIRED',
-          error: 'Inventory consumption failed. Order held for reconciliation.'
-        });
-      }
-    }
+    await runTestHook('verify.beforeTransition', { orderNumber: order_number });
 
-    // 12. Update order status in durable storage to PAID / CONFIRMED
+    // 11. Confirm the order and consume its reservation in ONE transaction that re-checks the
+    // order and its idempotency claim. The reads above may be stale (the webhook can cancel or
+    // confirm the order meanwhile), so nothing above is trusted for the write.
+    let outcome: VerifyTransitionOutcome;
     try {
-      if (orderDocRef) {
-        await updateDoc(orderDocRef, {
-          paymentStatus: 'PAID',
-          status: 'CONFIRMED',
-          razorpayPaymentId: razorpay_payment_id,
-          verifiedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
-      }
-    } catch (updErr) {
-      console.error('Could not update order status in Firestore:', updErr);
+      outcome = await confirmOrderPaymentFromVerify({
+        orderNumber: order_number,
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id
+      });
+    } catch (txErr) {
+      console.error('Payment verification transaction failed:', txErr);
       return res.status(500).json({
         verified: false,
-        status: 'RECONCILIATION_REQUIRED',
-        error: 'Payment confirmed by gateway but database update failed. Order held for reconciliation.'
+        status: 'UNVERIFIED',
+        error: 'Payment confirmed by gateway but the order could not be updated. Please retry; the webhook will also reconcile it.'
       });
     }
 
+    if (outcome.kind === 'already_paid') {
+      return res.json({
+        verified: true,
+        status: 'PAID',
+        paymentId: outcome.order.razorpayPaymentId || razorpay_payment_id,
+        orderId: razorpay_order_id,
+        orderNumber: order_number,
+        amount: outcome.order.total,
+        currency: outcome.order.currency || 'INR',
+        timestamp: outcome.order.verifiedAt || new Date().toISOString()
+      });
+    }
+    if (outcome.kind === 'rejected') {
+      return res.status(outcome.httpStatus).json({ verified: false, status: outcome.status, error: outcome.error });
+    }
     return res.json({
       verified: true,
       status: 'PAID',
@@ -1947,6 +1961,52 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Webhook processing exception:', err);
     return res.status(500).json({ error: 'Webhook processing error.' });
+  }
+});
+
+/**
+ * Maintenance: release stale inventory reservations that never became an order.
+ * Auth (either):
+ *  - `X-Maintenance-Key: <MAINTENANCE_SECRET>` (for Cloud Scheduler / cron), or
+ *  - `Authorization: Bearer <Firebase ID token>` of a user whose customers/{uid}.role is 'admin'.
+ * Body (optional): { "maxAgeMinutes": number } (never below 15).
+ */
+async function isMaintenanceAuthorized(req: Request): Promise<{ ok: boolean; status: number; error?: string }> {
+  const secret = process.env.MAINTENANCE_SECRET;
+  const key = req.headers['x-maintenance-key'];
+  if (typeof key === 'string' && key) {
+    if (!secret || secret.length < 16) return { ok: false, status: 503, error: 'Maintenance key auth is not configured.' };
+    const a = Buffer.from(key);
+    const b = Buffer.from(secret);
+    return a.length === b.length && crypto.timingSafeEqual(a, b)
+      ? { ok: true, status: 200 }
+      : { ok: false, status: 403, error: 'Invalid maintenance key.' };
+  }
+  const auth = req.headers.authorization;
+  if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+    try {
+      const decoded = await getAdminAuth(getAdminApp()).verifyIdToken(auth.slice(7));
+      const profile = await getAdminDb().collection('customers').doc(decoded.uid).get();
+      return profile.exists && profile.data()?.role === 'admin'
+        ? { ok: true, status: 200 }
+        : { ok: false, status: 403, error: 'Admin role required.' };
+    } catch {
+      return { ok: false, status: 401, error: 'Invalid or expired sign-in token.' };
+    }
+  }
+  return { ok: false, status: 401, error: 'Authentication required.' };
+}
+
+app.post('/api/admin/maintenance/expire-reservations', async (req: Request, res: Response) => {
+  const authz = await isMaintenanceAuthorized(req);
+  if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+  try {
+    const maxAgeMinutes = resolveMaxAgeMinutes(req.body?.maxAgeMinutes);
+    const report = await expireStaleReservations({ maxAgeMinutes });
+    return res.json({ maxAgeMinutes, ...report });
+  } catch (err: any) {
+    console.error('Reservation expiry failed:', err);
+    return res.status(500).json({ error: 'Reservation expiry failed; nothing was partially released. Safe to retry.' });
   }
 });
 
