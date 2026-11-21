@@ -30,16 +30,24 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  fetchLiveProducts,
-  updateProductInDb,
   fetchInventory,
-  updateInventoryStock,
   fetchOrders,
   updateOrderStatus,
   seedInitialCatalogIfNeeded,
   InventoryRecord
 } from '../../services/dbService';
 import { reviewsService, ProductReview } from '../../services/reviewsService';
+import {
+  subscribeAllProducts,
+  updateProductCommercials,
+  setProductStock,
+  uploadProductPhoto,
+  validateCommercialUpdate,
+  validateStock,
+  validatePhoto,
+  ALLOWED_PHOTO_TYPES
+} from '../../services/adminCatalogService';
+import { sortProducts } from '../../context/CatalogContext';
 import { Product, OrderRecord } from '../../types';
 
 interface AdminDashboardProps {
@@ -90,18 +98,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
 
   // Product editing modal state
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    tagline: '',
+    price: 0,
+    priceStatus: 'missing' as 'active' | 'missing',
+    isActive: true,
+    stock: 0
+  });
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
 
   const loadAdminData = async () => {
     setLoading(true);
     try {
-      const [prods, ords, inv, revs] = await Promise.all([
-        fetchLiveProducts(),
+      const [ords, inv, revs] = await Promise.all([
         fetchOrders(),
         fetchInventory(),
         reviewsService.getAllReviews()
       ]);
-      setProducts(prods);
       setOrders(ords);
       setInventory(inv);
       setReviews(revs);
@@ -117,6 +134,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
       loadAdminData();
     }
   }, [isOpen, isAdmin]);
+
+  // Realtime: every product (including inactive / historical) straight from Firestore
+  useEffect(() => {
+    if (!isOpen || !isAdmin) return;
+    return subscribeAllProducts(
+      (all) => setProducts(sortProducts(all)),
+      (err) => setFeedback(`Could not load products: ${err.message}`)
+    );
+  }, [isOpen, isAdmin]);
+
+  const openProductEditor = (prod: Product) => {
+    const invRecord = inventory.find((i) => i.productId === prod.id);
+    setEditingProduct(prod);
+    setEditForm({
+      name: prod.name,
+      tagline: prod.tagline || '',
+      price: prod.price,
+      priceStatus: prod.priceStatus === 'active' ? 'active' : 'missing',
+      isActive: prod.isActive === true,
+      stock: typeof invRecord?.availableQuantity === 'number' ? invRecord.availableQuantity : prod.availableStock ?? 0
+    });
+    setPhotoFile(null);
+    setEditError(null);
+  };
 
   const handleToggleFlag = (key: keyof FeatureFlags) => {
     const updated = { ...featureFlags, [key]: !featureFlags[key] };
@@ -184,28 +225,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
     e.preventDefault();
     if (!editingProduct) return;
 
-    try {
-      await updateProductInDb(editingProduct.id, {
-        name: editingProduct.name,
-        price: Number(editingProduct.price),
-        tagline: editingProduct.tagline,
-        shortDescription: editingProduct.shortDescription,
-        inStock: editingProduct.inStock,
-        isActive: editingProduct.inStock
-      });
+    const commercial = {
+      name: editForm.name,
+      tagline: editForm.tagline,
+      price: Number(editForm.price),
+      priceStatus: editForm.priceStatus,
+      isActive: editForm.isActive
+    };
+    const problem =
+      validateCommercialUpdate(commercial) ||
+      validateStock(Number(editForm.stock)) ||
+      (photoFile ? validatePhoto(photoFile) : null);
+    if (problem) {
+      setEditError(problem);
+      return;
+    }
 
-      setFeedback(`Product "${editingProduct.name}" updated successfully.`);
+    setSaving(true);
+    setEditError(null);
+    try {
+      if (photoFile) await uploadProductPhoto(editingProduct, photoFile);
+      await updateProductCommercials(editingProduct.id, commercial);
+      await setProductStock(editingProduct.id, Number(editForm.stock));
+
+      setFeedback(`Product "${commercial.name}" updated. The storefront updates automatically.`);
       setEditingProduct(null);
       loadAdminData();
       setTimeout(() => setFeedback(null), 3000);
     } catch (e: any) {
-      alert('Error updating product: ' + e.message);
+      setEditError('Could not save: ' + (e?.message || e));
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleUpdateStock = async (productId: string, newStock: number) => {
     try {
-      await updateInventoryStock(productId, newStock);
+      await setProductStock(productId, newStock);
       setFeedback('Inventory updated successfully.');
       loadAdminData();
       setTimeout(() => setFeedback(null), 3000);
@@ -518,15 +574,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                       <div className="flex-1 space-y-1">
                         <div className="flex justify-between items-start">
                           <h5 className="text-sm font-serif font-bold text-[#1F1B18]">{prod.name}</h5>
-                          <span className="text-xs font-bold text-[#1F1B18] font-sans">₹{prod.price}</span>
+                          <span className="text-xs font-bold text-[#1F1B18] font-sans">
+                            {prod.priceStatus === 'active' ? `₹${prod.price}` : 'Unpriced'}
+                          </span>
                         </div>
                         <p className="text-[11px] text-[#79716B] line-clamp-1">{prod.tagline}</p>
                         <div className="pt-2 flex items-center justify-between text-xs">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${prod.inStock ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                            {prod.inStock ? 'Active' : 'Inactive'}
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${prod.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                            {prod.isHistorical ? 'Historical' : prod.isActive ? 'Active' : 'Inactive'}
                           </span>
                           <button
-                            onClick={() => setEditingProduct(prod)}
+                            onClick={() => openProductEditor(prod)}
                             className="text-[#9E6D47] font-semibold hover:underline flex items-center gap-1 text-[11px]"
                           >
                             <Edit2 className="w-3 h-3" />
@@ -553,8 +611,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                         <label className="block text-[11px] font-medium text-[#79716B] mb-1">Product Title</label>
                         <input
                           type="text"
-                          value={editingProduct.name}
-                          onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                          value={editForm.name}
+                          onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                           className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
                         />
                       </div>
@@ -564,34 +622,80 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                           <label className="block text-[11px] font-medium text-[#79716B] mb-1">Price (₹)</label>
                           <input
                             type="number"
-                            value={editingProduct.price}
-                            onChange={(e) => setEditingProduct({ ...editingProduct, price: Number(e.target.value) })}
+                            min={0}
+                            step="1"
+                            value={editForm.price}
+                            onChange={(e) => setEditForm({ ...editForm, price: Number(e.target.value) })}
                             className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
                           />
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-medium text-[#79716B] mb-1">Status</label>
+                          <label className="block text-[11px] font-medium text-[#79716B] mb-1">Price Status</label>
                           <select
-                            value={editingProduct.inStock ? 'true' : 'false'}
-                            onChange={(e) => setEditingProduct({ ...editingProduct, inStock: e.target.value === 'true' })}
+                            value={editForm.priceStatus}
+                            onChange={(e) => setEditForm({ ...editForm, priceStatus: e.target.value as 'active' | 'missing' })}
                             className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
                           >
-                            <option value="true">Active & Available</option>
+                            <option value="missing">Missing (not buyable)</option>
+                            <option value="active">Active (verified retail price)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-[#79716B] mb-1">Status</label>
+                          <select
+                            value={editForm.isActive ? 'true' : 'false'}
+                            onChange={(e) => setEditForm({ ...editForm, isActive: e.target.value === 'true' })}
+                            className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
+                          >
+                            <option value="true">Active (shown in store)</option>
                             <option value="false">Inactive / Hidden</option>
                           </select>
                         </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-[#79716B] mb-1">Stock (units available)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="1"
+                            value={editForm.stock}
+                            onChange={(e) => setEditForm({ ...editForm, stock: Number(e.target.value) })}
+                            className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-medium text-[#79716B] mb-1">Product Photo</label>
+                        <div className="flex items-center gap-3">
+                          {editingProduct.image && (
+                            <img src={editingProduct.image} alt="" className="w-12 h-12 rounded-lg object-cover bg-stone-100" />
+                          )}
+                          <input
+                            type="file"
+                            accept={ALLOWED_PHOTO_TYPES.join(',')}
+                            onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                            className="text-xs text-[#79716B]"
+                          />
+                        </div>
+                        <p className="text-[10px] text-[#79716B] mt-1">JPEG, PNG or WebP, up to 5 MB. Replaces the main photo.</p>
                       </div>
 
                       <div>
                         <label className="block text-[11px] font-medium text-[#79716B] mb-1">Tagline</label>
                         <input
                           type="text"
-                          value={editingProduct.tagline}
-                          onChange={(e) => setEditingProduct({ ...editingProduct, tagline: e.target.value })}
+                          value={editForm.tagline}
+                          onChange={(e) => setEditForm({ ...editForm, tagline: e.target.value })}
                           className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
                         />
                       </div>
+
+                      {editError && (
+                        <p role="alert" className="text-[11px] text-rose-700">{editError}</p>
+                      )}
 
                       <div className="pt-3 flex justify-end gap-2 border-t border-[#E5DCCE]">
                         <button
@@ -603,9 +707,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                         </button>
                         <button
                           type="submit"
-                          className="px-5 py-2 bg-[#2A2521] text-white text-xs font-semibold rounded-xl"
+                          disabled={saving}
+                          className="px-5 py-2 bg-[#2A2521] text-white text-xs font-semibold rounded-xl disabled:opacity-60"
                         >
-                          Save Changes
+                          {saving ? 'Saving…' : 'Save Changes'}
                         </button>
                       </div>
                     </form>
