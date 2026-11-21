@@ -1,0 +1,6 @@
+{
+  "name": "The Calm Flame — Handcrafted Aromatherapy Candles",
+  "description": "Handcrafted aromatherapy candles rooted in India's botanical heritage. 100% natural soy wax, pure essential oils, and clean-burning cotton wicks.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

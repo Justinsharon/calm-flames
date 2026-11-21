@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  
+  --color-flame-warm: #FAF7F2;
+  --color-flame-sand: #F2ECE1;
+  --color-flame-stone: #E5DCCE;
+  --color-flame-amber: #D18D4D;
+  --color-flame-gold: #C27D38;
+  --color-flame-terracotta: #A45532;
+  --color-flame-dark: #1F1B18;
+  --color-flame-charcoal: #2A2521;
+  --color-flame-muted: #79716B;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-flame-warm);
+    color: var(--color-flame-dark);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, .font-serif {
+    font-family: var(--font-serif);
+  }
+}
+
+/* Custom smooth scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #FAF7F2;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D8CEBE;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #B5865C;
+}
+
+/* Subtle Candle Glow animation */
+@keyframes flame-glow {
+  0%, 100% {
+    opacity: 0.85;
+    transform: scale(1);
+    filter: drop-shadow(0 0 16px rgba(209, 141, 77, 0.45));
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+    filter: drop-shadow(0 0 24px rgba(224, 158, 92, 0.65));
+  }
+}
+
+.animate-flame-glow {
+  animation: flame-glow 4s ease-in-out infinite;
+}
+
+/* Ambient Breathe animation */
+@keyframes ambient-pulse {
+  0%, 100% {
+    transform: scale(0.94);
+    box-shadow: 0 0 40px rgba(209, 141, 77, 0.2);
+  }
+  50% {
+    transform: scale(1.12);
+    box-shadow: 0 0 70px rgba(209, 141, 77, 0.45);
+  }
+}
+
+.animate-ambient-pulse {
+  animation: ambient-pulse 8s ease-in-out infinite;
+}

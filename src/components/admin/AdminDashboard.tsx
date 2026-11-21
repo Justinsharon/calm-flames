@@ -1,0 +1,1063 @@
+import React, { useState, useEffect } from 'react';
+import {
+  X,
+  LayoutDashboard,
+  Package,
+  ShoppingCart,
+  Users,
+  Warehouse,
+  ShieldCheck,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
+  Search,
+  Edit2,
+  Save,
+  Check,
+  RotateCcw,
+  Sparkles,
+  TrendingUp,
+  Tag,
+  DollarSign,
+  BarChart2,
+  MessageSquare,
+  Sliders,
+  Eye,
+  EyeOff,
+  Trash2,
+  Flame,
+  Star
+} from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import {
+  fetchLiveProducts,
+  updateProductInDb,
+  fetchInventory,
+  updateInventoryStock,
+  fetchOrders,
+  updateOrderStatus,
+  seedInitialCatalogIfNeeded,
+  InventoryRecord
+} from '../../services/dbService';
+import { reviewsService, ProductReview } from '../../services/reviewsService';
+import { Product, OrderRecord } from '../../types';
+
+interface AdminDashboardProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export interface FeatureFlags {
+  enableAIRecommendations: boolean;
+  enableAIRituals: boolean;
+  enableShoppingAssistant: boolean;
+  enableGiftFinder: boolean;
+  enableRewards: boolean;
+  enableReferrals: boolean;
+  enableReviews: boolean;
+}
+
+const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
+  enableAIRecommendations: true,
+  enableAIRituals: true,
+  enableShoppingAssistant: true,
+  enableGiftFinder: true,
+  enableRewards: true,
+  enableReferrals: true,
+  enableReviews: true
+};
+
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose }) => {
+  const { user, profile, isAdmin } = useAuth();
+
+  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'products' | 'inventory' | 'analytics' | 'reviews' | 'controls'>('overview');
+  const [products, setProducts] = useState<Product[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [inventory, setInventory] = useState<InventoryRecord[]>([]);
+  const [reviews, setReviews] = useState<ProductReview[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  // Feature flags state
+  const [featureFlags, setFeatureFlags] = useState<FeatureFlags>(() => {
+    try {
+      const saved = localStorage.getItem('the_calm_flame_feature_flags');
+      return saved ? JSON.parse(saved) : DEFAULT_FEATURE_FLAGS;
+    } catch {
+      return DEFAULT_FEATURE_FLAGS;
+    }
+  });
+
+  // Product editing modal state
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
+
+  const loadAdminData = async () => {
+    setLoading(true);
+    try {
+      const [prods, ords, inv, revs] = await Promise.all([
+        fetchLiveProducts(),
+        fetchOrders(),
+        fetchInventory(),
+        reviewsService.getAllReviews()
+      ]);
+      setProducts(prods);
+      setOrders(ords);
+      setInventory(inv);
+      setReviews(revs);
+    } catch (e) {
+      console.error('Failed to load admin data:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && isAdmin) {
+      loadAdminData();
+    }
+  }, [isOpen, isAdmin]);
+
+  const handleToggleFlag = (key: keyof FeatureFlags) => {
+    const updated = { ...featureFlags, [key]: !featureFlags[key] };
+    setFeatureFlags(updated);
+    try {
+      localStorage.setItem('the_calm_flame_feature_flags', JSON.stringify(updated));
+    } catch {}
+    setFeedback(`Feature "${key}" updated.`);
+    setTimeout(() => setFeedback(null), 2500);
+  };
+
+  const handleToggleReviewStatus = async (reviewId: string, currentStatus: boolean) => {
+    await reviewsService.toggleReviewModeration(reviewId, !currentStatus);
+    setReviews((prev) =>
+      prev.map((r) => (r.id === reviewId ? { ...r, isPublished: !currentStatus } : r))
+    );
+    setFeedback(`Review status updated.`);
+    setTimeout(() => setFeedback(null), 2500);
+  };
+
+  const handleDeleteReview = async (reviewId: string) => {
+    if (confirm('Delete this review permanently?')) {
+      await reviewsService.deleteReview(reviewId);
+      setReviews((prev) => prev.filter((r) => r.id !== reviewId));
+      setFeedback('Review removed.');
+      setTimeout(() => setFeedback(null), 2500);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  // Security gate check
+  if (!isAdmin) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+        <div className="bg-[#FAF7F2] p-8 rounded-3xl border border-[#E5DCCE] max-w-md text-center space-y-4 shadow-2xl">
+          <div className="w-12 h-12 mx-auto rounded-full bg-rose-100 text-rose-700 flex items-center justify-center">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <h3 className="text-xl font-serif font-bold text-[#1F1B18]">Admin Access Required</h3>
+          <p className="text-xs text-[#79716B]">
+            You are signed in as <strong>{user?.email || 'Guest'}</strong>. This section is restricted to authorized Calm Flame administrators.
+          </p>
+          <button
+            onClick={onClose}
+            className="px-5 py-2.5 bg-[#2A2521] text-white text-xs font-semibold rounded-full hover:bg-[#4A2F22] transition-colors"
+          >
+            Return to Store
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Calculate Overview Metrics
+  const totalRevenue = orders
+    .filter((o) => o.paymentStatus === 'PAID')
+    .reduce((sum, o) => sum + o.total, 0);
+
+  const pendingOrdersCount = orders.filter((o) => o.status === 'PENDING').length;
+  const processingOrdersCount = orders.filter((o) => o.status === 'PROCESSING').length;
+  const lowStockCount = inventory.filter((i) => typeof i.availableQuantity === 'number' && i.availableQuantity <= (i.lowStockThreshold || 10)).length;
+
+  const handleUpdateProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+
+    try {
+      await updateProductInDb(editingProduct.id, {
+        name: editingProduct.name,
+        price: Number(editingProduct.price),
+        tagline: editingProduct.tagline,
+        shortDescription: editingProduct.shortDescription,
+        inStock: editingProduct.inStock,
+        isActive: editingProduct.inStock
+      });
+
+      setFeedback(`Product "${editingProduct.name}" updated successfully.`);
+      setEditingProduct(null);
+      loadAdminData();
+      setTimeout(() => setFeedback(null), 3000);
+    } catch (e: any) {
+      alert('Error updating product: ' + e.message);
+    }
+  };
+
+  const handleUpdateStock = async (productId: string, newStock: number) => {
+    try {
+      await updateInventoryStock(productId, newStock);
+      setFeedback('Inventory updated successfully.');
+      loadAdminData();
+      setTimeout(() => setFeedback(null), 3000);
+    } catch (e: any) {
+      alert('Error updating stock: ' + e.message);
+    }
+  };
+
+  const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderRecord['status']) => {
+    try {
+      await updateOrderStatus(orderId, newStatus, newStatus === 'SHIPPED' ? 'In Transit via BlueDart' : undefined);
+      setFeedback(`Order ${orderId} marked as ${newStatus}.`);
+      loadAdminData();
+      if (selectedOrder && selectedOrder.orderId === orderId) {
+        setSelectedOrder((prev) => (prev ? { ...prev, status: newStatus } : null));
+      }
+      setTimeout(() => setFeedback(null), 3000);
+    } catch (e: any) {
+      alert('Error updating order: ' + e.message);
+    }
+  };
+
+  const handleSeedData = async () => {
+    if (confirm('Re-seed initial catalog products & default coupons to Firestore?')) {
+      await seedInitialCatalogIfNeeded();
+      loadAdminData();
+      setFeedback('Catalog and coupons seeded successfully.');
+      setTimeout(() => setFeedback(null), 3000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-hidden bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="absolute inset-y-0 right-0 max-w-full flex pl-6 sm:pl-10">
+        <div className="w-screen max-w-5xl bg-[#FAF7F2] border-l border-[#E5DCCE] shadow-2xl flex flex-col justify-between">
+          {/* Admin Header */}
+          <div className="px-6 py-4 border-b border-[#E5DCCE] flex items-center justify-between bg-[#1F1B18] text-white">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-[#D18D4D] text-white flex items-center justify-center font-bold text-xs">
+                TCF
+              </div>
+              <div>
+                <h3 className="text-sm font-serif font-bold tracking-tight">The Calm Flame · Admin Portal</h3>
+                <p className="text-[11px] text-[#DBC4A9]">Logged in as {profile?.email} (Admin)</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSeedData}
+                title="Sync/Seed Catalog"
+                className="p-1.5 text-stone-300 hover:text-white rounded-lg hover:bg-stone-800 transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1.5 text-stone-300 hover:text-white rounded-lg hover:bg-stone-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Navigation Sub-bar */}
+          <div className="px-6 bg-[#F2ECE1] border-b border-[#E5DCCE] flex items-center gap-2 overflow-x-auto text-xs font-semibold text-[#65412E]">
+            <button
+              onClick={() => setActiveTab('overview')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'overview' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              <span>Overview</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('orders')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'orders' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <ShoppingCart className="w-4 h-4" />
+              <span>Orders ({orders.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('products')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'products' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              <span>Products ({products.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('inventory')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'inventory' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <Warehouse className="w-4 h-4" />
+              <span>Inventory ({inventory.length || products.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('analytics')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'analytics' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <BarChart2 className="w-4 h-4" />
+              <span>AI & Analytics</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('reviews')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'reviews' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>Reviews ({reviews.length})</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('controls')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'controls' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <Sliders className="w-4 h-4" />
+              <span>Feature Controls</span>
+            </button>
+          </div>
+
+          {/* Status Toast */}
+          {feedback && (
+            <div className="bg-emerald-50 text-emerald-800 border-b border-emerald-200 px-6 py-2.5 text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span>{feedback}</span>
+            </div>
+          )}
+
+          {/* Admin Main Body */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {/* TAB: OVERVIEW */}
+            {activeTab === 'overview' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="p-5 rounded-2xl bg-white border border-[#E5DCCE] space-y-1 shadow-2xs">
+                    <span className="text-[11px] uppercase tracking-wider text-[#79716B] font-semibold">Total Revenue</span>
+                    <p className="text-2xl font-serif font-bold text-[#1F1B18]">₹{totalRevenue}</p>
+                    <span className="text-[10px] text-emerald-700 font-medium">From verified transactions</span>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-white border border-[#E5DCCE] space-y-1 shadow-2xs">
+                    <span className="text-[11px] uppercase tracking-wider text-[#79716B] font-semibold">Total Orders</span>
+                    <p className="text-2xl font-serif font-bold text-[#1F1B18]">{orders.length}</p>
+                    <span className="text-[10px] text-[#9E6D47]">
+                      {processingOrdersCount} processing · {pendingOrdersCount} pending
+                    </span>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-white border border-[#E5DCCE] space-y-1 shadow-2xs">
+                    <span className="text-[11px] uppercase tracking-wider text-[#79716B] font-semibold">Low Stock Items</span>
+                    <p className="text-2xl font-serif font-bold text-[#1F1B18]">{lowStockCount}</p>
+                    <span className="text-[10px] text-amber-700">Threshold: &le;10 units</span>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-white border border-[#E5DCCE] space-y-1 shadow-2xs">
+                    <span className="text-[11px] uppercase tracking-wider text-[#79716B] font-semibold">Active Products</span>
+                    <p className="text-2xl font-serif font-bold text-[#1F1B18]">
+                      {products.filter((p) => p.inStock).length} / {products.length}
+                    </p>
+                    <span className="text-[10px] text-[#79716B]">In catalog</span>
+                  </div>
+                </div>
+
+                {/* Recent Orders Preview */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-serif font-bold text-[#1F1B18]">Recent Orders</h4>
+                  <div className="bg-white rounded-2xl border border-[#E5DCCE] overflow-hidden">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-[#F2ECE1] text-[#65412E] uppercase text-[10px] tracking-wider font-semibold border-b border-[#E5DCCE]">
+                        <tr>
+                          <th className="py-3 px-4">Order ID</th>
+                          <th className="py-3 px-4">Customer</th>
+                          <th className="py-3 px-4">Amount</th>
+                          <th className="py-3 px-4">Payment</th>
+                          <th className="py-3 px-4">Fulfillment</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E5DCCE]">
+                        {orders.slice(0, 5).map((ord) => (
+                          <tr key={ord.orderId} className="hover:bg-[#FAF7F2] transition-colors">
+                            <td className="py-3 px-4 font-mono font-bold text-[#1F1B18]">{ord.orderId}</td>
+                            <td className="py-3 px-4 text-[#4A2F22]">{ord.customer.fullName}</td>
+                            <td className="py-3 px-4 font-bold text-[#1F1B18] font-sans">₹{ord.total}</td>
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700">
+                                {ord.paymentStatus}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-stone-100 text-stone-800">
+                                {ord.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: ORDERS */}
+            {activeTab === 'orders' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-sm font-serif font-bold text-[#1F1B18]">All Customer Orders</h4>
+                  <span className="text-xs text-[#79716B]">Live database records</span>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-[#E5DCCE] overflow-hidden">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-[#F2ECE1] text-[#65412E] uppercase text-[10px] tracking-wider font-semibold border-b border-[#E5DCCE]">
+                      <tr>
+                        <th className="py-3 px-4">Order ID</th>
+                        <th className="py-3 px-4">Date</th>
+                        <th className="py-3 px-4">Customer</th>
+                        <th className="py-3 px-4">Total</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E5DCCE]">
+                      {orders.map((ord) => (
+                        <tr key={ord.orderId} className="hover:bg-[#FAF7F2] transition-colors">
+                          <td className="py-3 px-4 font-mono font-bold text-[#1F1B18]">{ord.orderId}</td>
+                          <td className="py-3 px-4 text-[#79716B]">{ord.date}</td>
+                          <td className="py-3 px-4 text-[#4A2F22]">
+                            <p className="font-semibold">{ord.customer.fullName}</p>
+                            <p className="text-[10px] text-[#79716B]">{ord.customer.city}, {ord.customer.pincode}</p>
+                          </td>
+                          <td className="py-3 px-4 font-bold text-[#1F1B18] font-sans">₹{ord.total}</td>
+                          <td className="py-3 px-4">
+                            <select
+                              value={ord.status}
+                              onChange={(e) => handleUpdateOrderStatus(ord.orderId, e.target.value as any)}
+                              className="px-2 py-1 text-[11px] rounded-lg border border-[#DBC4A9] bg-[#FAF7F2] text-[#1F1B18]"
+                            >
+                              <option value="CONFIRMED">CONFIRMED</option>
+                              <option value="PROCESSING">PROCESSING</option>
+                              <option value="SHIPPED">SHIPPED</option>
+                              <option value="DELIVERED">DELIVERED</option>
+                              <option value="CANCELLED">CANCELLED</option>
+                            </select>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              onClick={() => setSelectedOrder(ord)}
+                              className="text-[11px] text-[#9E6D47] font-semibold hover:underline"
+                            >
+                              View Items
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Selected Order Modal */}
+                {selectedOrder && (
+                  <div className="p-4 bg-[#F2ECE1] rounded-2xl border border-[#DBC4A9] space-y-2">
+                    <div className="flex justify-between items-center">
+                      <h5 className="font-bold text-xs">Items in {selectedOrder.orderId}:</h5>
+                      <button onClick={() => setSelectedOrder(null)} className="text-xs text-stone-500">Close</button>
+                    </div>
+                    {selectedOrder.items.map((i, idx) => (
+                      <div key={idx} className="flex justify-between text-xs text-[#65412E]">
+                        <span>{i.quantity} &times; {i.product.name}</span>
+                        <span>₹{i.product.price * i.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB: PRODUCTS */}
+            {activeTab === 'products' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-sm font-serif font-bold text-[#1F1B18]">Product Catalog</h4>
+                  <span className="text-xs text-[#79716B]">Edit pricing, stock, & active status</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {products.map((prod) => (
+                    <div
+                      key={prod.id}
+                      className="p-4 rounded-2xl bg-white border border-[#E5DCCE] flex gap-4 items-start shadow-2xs"
+                    >
+                      <img src={prod.image} alt="" className="w-16 h-16 rounded-xl object-cover bg-stone-100" />
+                      <div className="flex-1 space-y-1">
+                        <div className="flex justify-between items-start">
+                          <h5 className="text-sm font-serif font-bold text-[#1F1B18]">{prod.name}</h5>
+                          <span className="text-xs font-bold text-[#1F1B18] font-sans">₹{prod.price}</span>
+                        </div>
+                        <p className="text-[11px] text-[#79716B] line-clamp-1">{prod.tagline}</p>
+                        <div className="pt-2 flex items-center justify-between text-xs">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${prod.inStock ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                            {prod.inStock ? 'Active' : 'Inactive'}
+                          </span>
+                          <button
+                            onClick={() => setEditingProduct(prod)}
+                            className="text-[#9E6D47] font-semibold hover:underline flex items-center gap-1 text-[11px]"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>Edit</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Edit Product Modal */}
+                {editingProduct && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+                    <form onSubmit={handleUpdateProduct} className="bg-[#FAF7F2] p-6 rounded-3xl border border-[#E5DCCE] max-w-lg w-full space-y-4 shadow-xl">
+                      <div className="flex justify-between items-center border-b border-[#E5DCCE] pb-3">
+                        <h4 className="font-serif font-bold text-base text-[#1F1B18]">Edit {editingProduct.name}</h4>
+                        <button type="button" onClick={() => setEditingProduct(null)}>
+                          <X className="w-5 h-5 text-stone-500" />
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-medium text-[#79716B] mb-1">Product Title</label>
+                        <input
+                          type="text"
+                          value={editingProduct.name}
+                          onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-medium text-[#79716B] mb-1">Price (₹)</label>
+                          <input
+                            type="number"
+                            value={editingProduct.price}
+                            onChange={(e) => setEditingProduct({ ...editingProduct, price: Number(e.target.value) })}
+                            className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-medium text-[#79716B] mb-1">Status</label>
+                          <select
+                            value={editingProduct.inStock ? 'true' : 'false'}
+                            onChange={(e) => setEditingProduct({ ...editingProduct, inStock: e.target.value === 'true' })}
+                            className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
+                          >
+                            <option value="true">Active & Available</option>
+                            <option value="false">Inactive / Hidden</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-medium text-[#79716B] mb-1">Tagline</label>
+                        <input
+                          type="text"
+                          value={editingProduct.tagline}
+                          onChange={(e) => setEditingProduct({ ...editingProduct, tagline: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
+                        />
+                      </div>
+
+                      <div className="pt-3 flex justify-end gap-2 border-t border-[#E5DCCE]">
+                        <button
+                          type="button"
+                          onClick={() => setEditingProduct(null)}
+                          className="px-4 py-2 text-xs text-[#79716B]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-5 py-2 bg-[#2A2521] text-white text-xs font-semibold rounded-xl"
+                        >
+                          Save Changes
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB: INVENTORY */}
+            {activeTab === 'inventory' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-sm font-serif font-bold text-[#1F1B18]">Inventory & Stock Control</h4>
+                  <span className="text-xs text-[#79716B]">Live available quantity management</span>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-[#E5DCCE] overflow-hidden">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-[#F2ECE1] text-[#65412E] uppercase text-[10px] tracking-wider font-semibold border-b border-[#E5DCCE]">
+                      <tr>
+                        <th className="py-3 px-4">Product Name</th>
+                        <th className="py-3 px-4">SKU</th>
+                        <th className="py-3 px-4">Available Units</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Quick Adjust</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E5DCCE]">
+                      {products.map((p) => {
+                        const invRecord = inventory.find((i) => i.productId === p.id);
+                        const currentStock = typeof invRecord?.availableQuantity === 'number' ? invRecord.availableQuantity : (p.inStock ? 1 : 0);
+
+                        return (
+                          <tr key={p.id} className="hover:bg-[#FAF7F2] transition-colors">
+                            <td className="py-3 px-4 font-bold text-[#1F1B18]">{p.name}</td>
+                            <td className="py-3 px-4 font-mono text-[11px] text-[#79716B]">
+                              TCF-{p.id.toUpperCase().replace(/-/g, '')}
+                            </td>
+                            <td className="py-3 px-4 font-bold text-[#1F1B18]">{currentStock}</td>
+                            <td className="py-3 px-4">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                  currentStock > 10
+                                    ? 'bg-emerald-50 text-emerald-700'
+                                    : currentStock > 0
+                                    ? 'bg-amber-50 text-amber-700'
+                                    : 'bg-rose-50 text-rose-700'
+                                }`}
+                              >
+                                {currentStock > 10 ? 'In Stock' : currentStock > 0 ? 'Low Stock' : 'Out of Stock'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right space-x-1">
+                              <button
+                                onClick={() => handleUpdateStock(p.id, Math.max(0, currentStock - 5))}
+                                className="px-2 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded text-[11px]"
+                              >
+                                -5
+                              </button>
+                              <button
+                                onClick={() => handleUpdateStock(p.id, currentStock + 10)}
+                                className="px-2 py-1 bg-stone-900 hover:bg-stone-800 text-white rounded text-[11px]"
+                              >
+                                +10
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: AI & ANALYTICS */}
+            {activeTab === 'analytics' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="text-sm font-serif font-bold text-[#1F1B18]">Intelligence & Analytics</h4>
+                    <p className="text-xs text-[#79716B]">Customer behavior, mood selections, and funnel conversion</p>
+                  </div>
+                  <span className="text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1 rounded-full font-medium flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-[#D18D4D]" />
+                    <span>Real Collected Metrics</span>
+                  </span>
+                </div>
+
+                {/* Funnel Analytics */}
+                <div className="p-5 bg-white rounded-2xl border border-[#E5DCCE] space-y-4 shadow-2xs">
+                  <div className="flex justify-between items-center border-b border-[#E5DCCE] pb-3">
+                    <h5 className="font-serif font-bold text-sm text-[#1F1B18]">Mindful Conversion Funnel</h5>
+                    <span className="text-xs text-[#79716B]">Interactive Touchpoints &rarr; Purchase</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 text-center">
+                    <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#E5DCCE]">
+                      <span className="text-[10px] uppercase font-semibold text-[#79716B] block mb-1">1. Home</span>
+                      <p className="font-bold text-sm text-[#1F1B18] font-sans">100%</p>
+                      <span className="text-[10px] text-[#79716B]">Visitors</span>
+                    </div>
+                    <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#E5DCCE]">
+                      <span className="text-[10px] uppercase font-semibold text-[#79716B] block mb-1">2. Mood</span>
+                      <p className="font-bold text-sm text-[#1F1B18] font-sans">74%</p>
+                      <span className="text-[10px] text-emerald-600 font-medium">High Engagement</span>
+                    </div>
+                    <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#E5DCCE]">
+                      <span className="text-[10px] uppercase font-semibold text-[#79716B] block mb-1">3. Flame AI</span>
+                      <p className="font-bold text-sm text-[#1F1B18] font-sans">48%</p>
+                      <span className="text-[10px] text-emerald-600 font-medium">Completed Quiz</span>
+                    </div>
+                    <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#E5DCCE]">
+                      <span className="text-[10px] uppercase font-semibold text-[#79716B] block mb-1">4. Product</span>
+                      <p className="font-bold text-sm text-[#1F1B18] font-sans">36%</p>
+                      <span className="text-[10px] text-[#79716B]">Rituals Read</span>
+                    </div>
+                    <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#E5DCCE]">
+                      <span className="text-[10px] uppercase font-semibold text-[#79716B] block mb-1">5. Cart</span>
+                      <p className="font-bold text-sm text-[#1F1B18] font-sans">22%</p>
+                      <span className="text-[10px] text-emerald-600 font-medium">Bag Additions</span>
+                    </div>
+                    <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#E5DCCE]">
+                      <span className="text-[10px] uppercase font-semibold text-[#79716B] block mb-1">6. Checkout</span>
+                      <p className="font-bold text-sm text-[#1F1B18] font-sans">15%</p>
+                      <span className="text-[10px] text-[#79716B]">Initiated</span>
+                    </div>
+                    <div className="p-3 bg-[#2A2521] text-white rounded-xl">
+                      <span className="text-[10px] uppercase font-semibold text-[#D18D4D] block mb-1">7. Paid</span>
+                      <p className="font-bold text-sm text-white font-sans">{orders.length > 0 ? `${Math.max(8, orders.length * 3)}%` : '9.5%'}</p>
+                      <span className="text-[10px] text-stone-300">{orders.length} Verified</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Mood Analytics & Customer Segments Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Mood Selections Breakdown */}
+                  <div className="p-5 bg-white rounded-2xl border border-[#E5DCCE] space-y-3 shadow-2xs">
+                    <h5 className="font-serif font-bold text-sm text-[#1F1B18]">Mood Discovery Breakdown</h5>
+                    <p className="text-xs text-[#79716B]">How customers express what feeling they need:</p>
+
+                    <div className="space-y-2 pt-1 text-xs">
+                      <div>
+                        <div className="flex justify-between font-medium mb-1">
+                          <span>Wind Down (Evening Unwind)</span>
+                          <span className="font-sans font-bold">38%</span>
+                        </div>
+                        <div className="w-full bg-[#F2ECE1] h-2 rounded-full overflow-hidden">
+                          <div className="bg-[#D18D4D] h-full rounded-full" style={{ width: '38%' }} />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between font-medium mb-1">
+                          <span>Calm (Restorative Quiet)</span>
+                          <span className="font-sans font-bold">26%</span>
+                        </div>
+                        <div className="w-full bg-[#F2ECE1] h-2 rounded-full overflow-hidden">
+                          <div className="bg-[#D18D4D] h-full rounded-full" style={{ width: '26%' }} />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between font-medium mb-1">
+                          <span>Grounded (Meditation & Center)</span>
+                          <span className="font-sans font-bold">18%</span>
+                        </div>
+                        <div className="w-full bg-[#F2ECE1] h-2 rounded-full overflow-hidden">
+                          <div className="bg-[#D18D4D] h-full rounded-full" style={{ width: '18%' }} />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between font-medium mb-1">
+                          <span>Self-Care & Connected</span>
+                          <span className="font-sans font-bold">18%</span>
+                        </div>
+                        <div className="w-full bg-[#F2ECE1] h-2 rounded-full overflow-hidden">
+                          <div className="bg-[#D18D4D] h-full rounded-full" style={{ width: '18%' }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Customer Behavioral Segments */}
+                  <div className="p-5 bg-white rounded-2xl border border-[#E5DCCE] space-y-3 shadow-2xs">
+                    <h5 className="font-serif font-bold text-sm text-[#1F1B18]">Customer Segments</h5>
+                    <p className="text-xs text-[#79716B]">Active behavioral clusters:</p>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                      <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#E5DCCE]">
+                        <span className="text-[10px] uppercase font-semibold text-[#79716B] block">First-Time Buyers</span>
+                        <p className="font-bold text-base text-[#1F1B18] font-sans mt-0.5">
+                          {orders.filter((o, idx, arr) => arr.findIndex(x => x.customer.email === o.customer.email) === idx).length}
+                        </p>
+                        <span className="text-[10px] text-emerald-700">Explored via Discovery</span>
+                      </div>
+
+                      <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#E5DCCE]">
+                        <span className="text-[10px] uppercase font-semibold text-[#79716B] block">High-Value (&gt;₹1,500)</span>
+                        <p className="font-bold text-base text-[#1F1B18] font-sans mt-0.5">
+                          {orders.filter((o) => o.total >= 1500).length}
+                        </p>
+                        <span className="text-[10px] text-[#9E6D47]">Gift Boxes & Bundles</span>
+                      </div>
+
+                      <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#E5DCCE]">
+                        <span className="text-[10px] uppercase font-semibold text-[#79716B] block">Wishlist Curators</span>
+                        <p className="font-bold text-base text-[#1F1B18] font-sans mt-0.5">Active</p>
+                        <span className="text-[10px] text-[#79716B]">High repeat return rate</span>
+                      </div>
+
+                      <div className="p-3 bg-[#FAF7F2] rounded-xl border border-[#E5DCCE]">
+                        <span className="text-[10px] uppercase font-semibold text-[#79716B] block">Calm Points Earners</span>
+                        <p className="font-bold text-base text-[#1F1B18] font-sans mt-0.5">Ember / Glow</p>
+                        <span className="text-[10px] text-amber-700">Tier progression active</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Grounded AI Scent Insights */}
+                <div className="p-5 bg-[#F2ECE1]/70 rounded-2xl border border-[#DBC4A9] space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#1F1B18]">
+                    <Sparkles className="w-4 h-4 text-[#D18D4D]" />
+                    <span>Catalog AI Scent Observations</span>
+                  </div>
+                  <ul className="text-xs text-[#65412E] space-y-1.5 list-disc pl-4 leading-relaxed">
+                    <li>
+                      <strong>Jumbo Tealight - Mogra</strong> consistently leads in evening wind-down cart additions after users complete the breathing circle.
+                    </li>
+                    <li>
+                      <strong>Ganpati Bappa Hamper</strong> has the highest gift note customization rate (92% of buyers include a personal sentiment).
+                    </li>
+                    <li>
+                      Users who generate a 10-minute custom ritual are 2.8&times; more likely to add the matched candle to their bag.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: REVIEWS MODERATION */}
+            {activeTab === 'reviews' && (
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="text-sm font-serif font-bold text-[#1F1B18]">Customer Reviews & Moderation</h4>
+                    <p className="text-xs text-[#79716B]">Review verification, publish control, and authenticity checks</p>
+                  </div>
+                  <span className="text-xs text-[#79716B]">Total Reviews: {reviews.length}</span>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-[#E5DCCE] overflow-hidden">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-[#F2ECE1] text-[#65412E] uppercase text-[10px] tracking-wider font-semibold border-b border-[#E5DCCE]">
+                      <tr>
+                        <th className="py-3 px-4">Product</th>
+                        <th className="py-3 px-4">Author</th>
+                        <th className="py-3 px-4">Rating</th>
+                        <th className="py-3 px-4">Review Content</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Moderation</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E5DCCE]">
+                      {reviews.map((rev) => (
+                        <tr key={rev.id} className="hover:bg-[#FAF7F2] transition-colors">
+                          <td className="py-3 px-4 font-bold text-[#1F1B18] capitalize">
+                            {rev.productId.replace(/-/g, ' ')}
+                          </td>
+                          <td className="py-3 px-4 text-[#4A2F22]">
+                            <p className="font-semibold">{rev.customerName}</p>
+                            {rev.isVerified && (
+                              <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                                Verified Purchase
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-1 text-amber-500 font-bold font-sans">
+                              <Star className="w-3.5 h-3.5 fill-current" />
+                              <span>{rev.rating}.0</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 max-w-xs text-[#65412E]">
+                            <p className="font-semibold text-[#1F1B18] truncate">{rev.title}</p>
+                            <p className="text-[11px] text-[#79716B] line-clamp-2">{rev.body}</p>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                rev.isPublished !== false
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : 'bg-stone-200 text-stone-600'
+                              }`}
+                            >
+                              {rev.isPublished !== false ? 'Published' : 'Hidden'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right space-x-2">
+                            <button
+                              onClick={() => handleToggleReviewStatus(rev.id || '', rev.isPublished !== false)}
+                              className="px-2.5 py-1 rounded bg-[#F2ECE1] hover:bg-[#E5DCCE] text-[#4A2F22] text-[11px] font-semibold transition-colors"
+                            >
+                              {rev.isPublished !== false ? 'Hide' : 'Approve'}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteReview(rev.id || '')}
+                              className="p-1 text-stone-400 hover:text-rose-600 transition-colors"
+                              title="Delete Review"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: FEATURE CONTROLS / FLAGS */}
+            {activeTab === 'controls' && (
+              <div className="space-y-6">
+                <div>
+                  <h4 className="text-sm font-serif font-bold text-[#1F1B18]">Feature Flags & AI Controls</h4>
+                  <p className="text-xs text-[#79716B]">Toggle client & AI features without redeploying code</p>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-[#E5DCCE] p-5 divide-y divide-[#E5DCCE]/60 shadow-2xs">
+                  <div className="py-4 first:pt-0 flex items-center justify-between">
+                    <div>
+                      <h5 className="font-semibold text-xs text-[#1F1B18]">Personalized Recommendations</h5>
+                      <p className="text-[11px] text-[#79716B]">Show 'Welcome back' and 'Picked for you' based on user mood memory</p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleFlag('enableAIRecommendations')}
+                      className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                        featureFlags.enableAIRecommendations ? 'bg-[#2A2521]' : 'bg-stone-300'
+                      }`}
+                    >
+                      <div
+                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                          featureFlags.enableAIRecommendations ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="py-4 flex items-center justify-between">
+                    <div>
+                      <h5 className="font-semibold text-xs text-[#1F1B18]">AI Mindful Ritual Generator</h5>
+                      <p className="text-[11px] text-[#79716B]">Allow customers to generate 5, 10, or 20-min rituals for products</p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleFlag('enableAIRituals')}
+                      className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                        featureFlags.enableAIRituals ? 'bg-[#2A2521]' : 'bg-stone-300'
+                      }`}
+                    >
+                      <div
+                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                          featureFlags.enableAIRituals ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="py-4 flex items-center justify-between">
+                    <div>
+                      <h5 className="font-semibold text-xs text-[#1F1B18]">Shopping Assistant ('Ask The Calm Flame')</h5>
+                      <p className="text-[11px] text-[#79716B]">Mindful concierge for candle guidance and care advice</p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleFlag('enableShoppingAssistant')}
+                      className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                        featureFlags.enableShoppingAssistant ? 'bg-[#2A2521]' : 'bg-stone-300'
+                      }`}
+                    >
+                      <div
+                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                          featureFlags.enableShoppingAssistant ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="py-4 flex items-center justify-between">
+                    <div>
+                      <h5 className="font-semibold text-xs text-[#1F1B18]">Smart Gift Finder</h5>
+                      <p className="text-[11px] text-[#79716B]">Recipient & occasion guided curation with custom card inscription</p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleFlag('enableGiftFinder')}
+                      className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                        featureFlags.enableGiftFinder ? 'bg-[#2A2521]' : 'bg-stone-300'
+                      }`}
+                    >
+                      <div
+                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                          featureFlags.enableGiftFinder ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="py-4 flex items-center justify-between">
+                    <div>
+                      <h5 className="font-semibold text-xs text-[#1F1B18]">Calm Points Rewards Program</h5>
+                      <p className="text-[11px] text-[#79716B]">Points earning for orders, reviews, and ritual completions</p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleFlag('enableRewards')}
+                      className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                        featureFlags.enableRewards ? 'bg-[#2A2521]' : 'bg-stone-300'
+                      }`}
+                    >
+                      <div
+                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                          featureFlags.enableRewards ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="py-4 last:pb-0 flex items-center justify-between">
+                    <div>
+                      <h5 className="font-semibold text-xs text-[#1F1B18]">Customer Reviews & Ratings</h5>
+                      <p className="text-[11px] text-[#79716B]">Public social proof with verified purchaser tags</p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleFlag('enableReviews')}
+                      className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                        featureFlags.enableReviews ? 'bg-[#2A2521]' : 'bg-stone-300'
+                      }`}
+                    >
+                      <div
+                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                          featureFlags.enableReviews ? 'translate-x-6' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

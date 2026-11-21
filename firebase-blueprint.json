@@ -1,0 +1,185 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Candle or wellness product in catalog",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "slug": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "shortDescription": { "type": "string", "maxLength": 500 },
+        "tagline": { "type": "string", "maxLength": 200 },
+        "price": { "type": "number" },
+        "compareAtPrice": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 5 },
+        "images": { "type": "array" },
+        "thumbnail": { "type": "string" },
+        "category": { "type": "string" },
+        "categories": { "type": "array" },
+        "moods": { "type": "array" },
+        "scentFamily": { "type": "string" },
+        "scentNotes": { "type": "object" },
+        "ingredients": { "type": "string" },
+        "burnTime": { "type": "string" },
+        "weight": { "type": "string" },
+        "ritual": { "type": "object" },
+        "stock": { "type": "number" },
+        "sku": { "type": "string", "maxLength": 50 },
+        "isActive": { "type": "boolean" },
+        "isFeatured": { "type": "boolean" },
+        "isNew": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "slug", "price", "stock", "isActive"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer user profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "firstName": { "type": "string", "maxLength": 100 },
+        "lastName": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 20 },
+        "role": { "type": "string", "enum": ["customer", "admin"] },
+        "addresses": { "type": "array" },
+        "preferences": { "type": "object" },
+        "referralCode": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer purchase order",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderNumber": { "type": "string", "maxLength": 30 },
+        "customerId": { "type": "string" },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "discount": { "type": "number" },
+        "shipping": { "type": "number" },
+        "tax": { "type": "number" },
+        "total": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 5 },
+        "status": { "type": "string", "enum": ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED", "REFUNDED"] },
+        "paymentStatus": { "type": "string", "enum": ["CREATED", "PENDING", "PAID", "FAILED", "REFUNDED", "PARTIALLY_REFUNDED"] },
+        "fulfillmentStatus": { "type": "string" },
+        "shippingAddress": { "type": "object" },
+        "billingAddress": { "type": "object" },
+        "paymentMethod": { "type": "string" },
+        "razorpayOrderId": { "type": "string" },
+        "razorpayPaymentId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "orderNumber", "items", "subtotal", "total", "status", "paymentStatus"]
+    },
+    "Ritual": {
+      "title": "Ritual",
+      "description": "User saved mindful candle ritual",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "title": { "type": "string", "maxLength": 120 },
+        "duration": { "type": "string" },
+        "context": { "type": "string" },
+        "steps": { "type": "array" },
+        "mantra": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "customerId", "title", "steps"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Customer product review with verified purchase tag",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "orderId": { "type": "string" },
+        "rating": { "type": "number" },
+        "title": { "type": "string", "maxLength": 100 },
+        "body": { "type": "string", "maxLength": 1000 },
+        "isVerified": { "type": "boolean" },
+        "isPublished": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "productId", "customerId", "rating", "body"]
+    },
+    "Reward": {
+      "title": "Reward",
+      "description": "Calm Points balance and tier for user",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "pointsBalance": { "type": "number" },
+        "lifetimePoints": { "type": "number" },
+        "tier": { "type": "string", "enum": ["Ember", "Glow", "Flame"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerId", "pointsBalance", "tier"]
+    },
+    "RewardTransaction": {
+      "title": "RewardTransaction",
+      "description": "Ledger of Calm Points earned or spent",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" },
+        "type": { "type": "string", "enum": ["earn", "redeem"] },
+        "points": { "type": "number" },
+        "referenceId": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "customerId", "points", "type"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "All public and admin candle products"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer purchase orders"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Customer profiles and preferences"
+    },
+    "/customers/{customerId}/rituals/{ritualId}": {
+      "schema": "Ritual",
+      "description": "Customer personal saved rituals"
+    },
+    "/customers/{customerId}/rewards": {
+      "schema": "Reward",
+      "description": "Calm Points balance and tier"
+    },
+    "/customers/{customerId}/rewardTransactions/{transactionId}": {
+      "schema": "RewardTransaction",
+      "description": "Ledger of Calm Points activity"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Product reviews and ratings"
+    },
+    "/moodInteractions/{interactionId}": {
+      "schema": { "$ref": "Product" },
+      "description": "Customer mood discovery signals"
+    }
+  }
+}

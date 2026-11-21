@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'justinsharon56@gmail.com'
+      );
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if (resource == null || resource.data.isActive == true) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /inventory/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /coupons/{couponCode} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /customers/{customerId} {
+      allow read: if isOwner(customerId) || isAdmin();
+      allow create: if isOwner(customerId) && (!('role' in request.resource.data) || request.resource.data.role == 'customer' || isAdmin());
+      allow update: if (isOwner(customerId) && (!('role' in request.resource.data) || request.resource.data.role == resource.data.role || isAdmin())) || isAdmin();
+      allow delete: if isAdmin();
+
+      match /cart/{itemId} {
+        allow read, write: if isOwner(customerId) || isAdmin();
+      }
+
+      match /wishlist/{itemId} {
+        allow read, write: if isOwner(customerId) || isAdmin();
+      }
+
+      match /preferences/{prefId} {
+        allow read, write: if isOwner(customerId) || isAdmin();
+      }
+
+      match /rituals/{ritualId} {
+        allow read, write: if isOwner(customerId) || isAdmin();
+      }
+
+      match /rewards/{rewardId} {
+        allow read: if isOwner(customerId) || isAdmin();
+        allow write: if isAdmin() || isOwner(customerId);
+      }
+
+      match /rewardTransactions/{txId} {
+        allow read: if isOwner(customerId) || isAdmin();
+        allow write: if isAdmin() || isOwner(customerId);
+      }
+    }
+
+    match /orders/{orderId} {
+      allow read: if (isSignedIn() && resource.data.customerId == request.auth.uid) || isAdmin();
+      allow create: if (
+        (isSignedIn() && request.resource.data.customerId == request.auth.uid) ||
+        (!isSignedIn() && request.resource.data.customerId is string) ||
+        isAdmin()
+      );
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if (isSignedIn() && resource.data.customerId == request.auth.uid) || isAdmin();
+      allow write: if isAdmin() || (isSignedIn() && request.resource.data.customerId == request.auth.uid);
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
+      allow update, delete: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+    }
+
+    match /moodInteractions/{interactionId} {
+      allow create: if true;
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    match /razorpayEvents/{eventId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /analyticsEvents/{eventId} {
+      allow create: if true;
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+  }
+}
