@@ -235,6 +235,27 @@ describe('Route-Level Backend Integration & Production-Safety Test Suite', () =>
   // =========================================================================
   // 6. AI Product Validation Boundaries
   // =========================================================================
+  describe('Reservation expiry endpoint auth (no database needed)', () => {
+    const url = '/api/admin/maintenance/expire-reservations';
+    it('rejects requests without credentials (401) or with a wrong key (403)', async () => {
+      process.env.MAINTENANCE_SECRET = 'maintenance-secret-0123456789';
+      expect((await request(app).post(url).send({})).status).toBe(401);
+      expect((await request(app).post(url).set('x-maintenance-key', 'wrong').send({})).status).toBe(403);
+    });
+    it('refuses key auth when MAINTENANCE_SECRET is unset or too short (503)', async () => {
+      delete process.env.MAINTENANCE_SECRET;
+      expect((await request(app).post(url).set('x-maintenance-key', 'anything').send({})).status).toBe(503);
+      process.env.MAINTENANCE_SECRET = 'short';
+      expect((await request(app).post(url).set('x-maintenance-key', 'short').send({})).status).toBe(503);
+    });
+    it('with a valid key but no database, fails closed with 500 and releases nothing', async () => {
+      process.env.MAINTENANCE_SECRET = 'maintenance-secret-0123456789';
+      const res = await request(app).post(url).set('x-maintenance-key', 'maintenance-secret-0123456789').send({});
+      expect(res.status).toBe(500);
+      expect(res.body.error).toMatch(/safe to retry/i);
+    });
+  });
+
   // Catalogue-dependent route behaviour (unknown / historical / unpriced products, AI endpoints)
   // is tested against a seeded Firestore emulator in src/tests/emulator/routes_catalog.emulator.test.ts.
   // Here, with Firestore disabled, every route that needs product data must FAIL CLOSED.
