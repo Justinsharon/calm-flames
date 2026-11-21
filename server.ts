@@ -14,6 +14,7 @@ import {
 import { runTestHook } from './src/server/testHooks';
 import { confirmOrderPaymentFromVerify, type VerifyTransitionOutcome } from './src/server/orderTransitions';
 import { expireStaleReservations, resolveMaxAgeMinutes } from './src/server/reservationExpiry';
+import { expireAbandonedOrders, resolveOrderMaxAgeMinutes } from './src/server/orderExpiry';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getAdminApp } from './src/server/firestoreAdmin';
 import { getAdminDb, doc, getDoc, runTransaction } from './src/server/firestoreAdmin';
@@ -1770,6 +1771,27 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
             return { outcome: 'already_paid' };
           }
 
+          // Late payment for an order the abandoned-order sweeper already EXPIRED (its stock was
+          // released). Never drop it: record the payment and hold the order for manual
+          // fulfil-or-refund. Inventory is not touched.
+          if (curOrderData.status === 'EXPIRED') {
+            transaction.update(orderDocRef, {
+              paymentStatus: 'PAID',
+              status: 'RECONCILIATION_REQUIRED',
+              reconciliationReason: 'PAID_AFTER_EXPIRY',
+              razorpayPaymentId: rzpPaymentId || curOrderData.razorpayPaymentId || null,
+              paidAfterExpiryAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            });
+            transaction.update(eventDocRef, {
+              status: 'COMPLETED',
+              completedAt: new Date().toISOString(),
+              completedByGeneration: workerLeaseGeneration,
+              note: 'Payment arrived after the order expired; order held for reconciliation.'
+            });
+            return { outcome: 'paid_after_expiry' };
+          }
+
           // Consume inventory reservation atomically inside this transaction
           const resId = curOrderData.reservationId || curOrderData.reservationToken;
           if (resId) {
@@ -1841,6 +1863,14 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
               note: 'Ignored payment.failed for already confirmed order'
             });
             return { outcome: 'ignored_delayed_failure' };
+          }
+          if (curOrderData.status === 'EXPIRED') {
+            transaction.update(eventDocRef, {
+              status: 'COMPLETED',
+              completedAt: new Date().toISOString(),
+              note: 'Ignored payment.failed for an expired order (stock already released).'
+            });
+            return { outcome: 'already_expired' };
           }
 
           // Release inventory reservation atomically inside this transaction
@@ -2001,12 +2031,16 @@ app.post('/api/admin/maintenance/expire-reservations', async (req: Request, res:
   const authz = await isMaintenanceAuthorized(req);
   if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
   try {
+    // 1. Abandoned PAYMENT_PENDING orders (checks Razorpay first; expires order + releases stock)
+    const orderMaxAgeMinutes = resolveOrderMaxAgeMinutes(req.body?.orderMaxAgeMinutes);
+    const abandonedOrders = await expireAbandonedOrders({ maxAgeMinutes: orderMaxAgeMinutes });
+    // 2. Reservations that never became an order
     const maxAgeMinutes = resolveMaxAgeMinutes(req.body?.maxAgeMinutes);
     const report = await expireStaleReservations({ maxAgeMinutes });
-    return res.json({ maxAgeMinutes, ...report });
+    return res.json({ maxAgeMinutes, ...report, abandonedOrders: { maxAgeMinutes: orderMaxAgeMinutes, ...abandonedOrders } });
   } catch (err: any) {
-    console.error('Reservation expiry failed:', err);
-    return res.status(500).json({ error: 'Reservation expiry failed; nothing was partially released. Safe to retry.' });
+    console.error('Maintenance sweep failed:', err);
+    return res.status(500).json({ error: 'Maintenance sweep failed; each order/reservation is all-or-nothing. Safe to retry.' });
   }
 });
 

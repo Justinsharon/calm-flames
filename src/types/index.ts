@@ -23,7 +23,8 @@ export type OrderStatus =
   | 'CANCELLED'
   | 'FAILED'
   | 'REFUNDED'
-  | 'RECONCILIATION_REQUIRED';
+  | 'RECONCILIATION_REQUIRED'
+  | 'EXPIRED';
 
 export type PaymentStatus =
   | 'CREATED'
