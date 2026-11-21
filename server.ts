@@ -4,13 +4,8 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
-import {
-  ACTIVE_CANONICAL_CATALOG_MAP,
-  CANONICAL_CATALOG_MAP,
-  CANONICAL_PRODUCTS,
-  getActiveCanonicalProductById,
-  getCanonicalProductById
-} from './src/data/canonicalCatalog';
+import { getActiveCatalog, getProductsByIds } from './src/server/catalogService';
+import { hasVerifiedPrice } from './src/lib/productMapping';
 import {
   reserveInventoryTransaction,
   consumeInventoryReservation,
@@ -28,7 +23,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-const SERVER_CATALOG: Record<string, any> = ACTIVE_CANONICAL_CATALOG_MAP;
+const CATALOG_UNAVAILABLE = {
+  error: 'Product catalogue is temporarily unavailable. Please try again shortly.'
+};
 
 app.use(
   express.json({
@@ -112,16 +109,24 @@ app.get('/api/checkout/readiness', async (_req: Request, res: Response) => {
   const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET;
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-  const activeProducts = Object.values(ACTIVE_CANONICAL_CATALOG_MAP);
-  const pricedProductsCount = activeProducts.filter(p => p.priceStatus === 'active' && p.price > 0).length;
-  const missingPriceCount = activeProducts.filter(p => p.priceStatus === 'missing' || p.price <= 0).length;
+  // Live catalogue from Firestore; an unreadable catalogue counts as "no priced products".
+  let activeProducts: any[] = [];
+  let catalogueAvailable = false;
+  try {
+    activeProducts = Object.values(await getActiveCatalog());
+    catalogueAvailable = true;
+  } catch (catErr) {
+    activeProducts = [];
+  }
+  const pricedProductsCount = activeProducts.filter((p) => hasVerifiedPrice(p)).length;
+  const missingPriceCount = activeProducts.length - pricedProductsCount;
 
   // Operational database check
   let databaseAvailable = false;
   let inventoryConfigured = false;
   try {
     const db = getAdminDb();
-    databaseAvailable = Boolean(db);
+    databaseAvailable = Boolean(db) && catalogueAvailable;
     // Verify inventory collection access or structure
     const invRecords = await fetchInventory();
     inventoryConfigured = Array.isArray(invRecords);
@@ -133,9 +138,13 @@ app.get('/api/checkout/readiness', async (_req: Request, res: Response) => {
   const hasPaymentCredentials = Boolean(razorpayKeyId && razorpayKeySecret);
   const hasWebhookSecret = Boolean(webhookSecret);
   const hasPricedCatalogue = pricedProductsCount > 0 && missingPriceCount === 0;
+  // Explicit owner switch (Phase 4). Prices are now editable live in Firebase, so a fully priced
+  // catalogue alone must never turn real checkout on.
+  const checkoutSwitchOn = process.env.CHECKOUT_ENABLED === 'true';
 
   // Real checkout must remain disabled unless every condition is satisfied
   const isCheckoutEnabled =
+    checkoutSwitchOn &&
     databaseAvailable &&
     inventoryConfigured &&
     hasPaymentCredentials &&
@@ -154,6 +163,7 @@ app.get('/api/checkout/readiness', async (_req: Request, res: Response) => {
       inventoryConfigured,
       paymentCredentialsConfigured: hasPaymentCredentials,
       webhookSecretConfigured: hasWebhookSecret,
+      checkoutSwitchOn,
     },
     message: isCheckoutEnabled
       ? 'All production checkout gates verified.'
@@ -165,7 +175,7 @@ app.get('/api/checkout/readiness', async (_req: Request, res: Response) => {
  * 1. Cart Validation Endpoint (Authoritative Prices & Line Items)
  * Rejects missing prices, non-positive prices, historical products, and invalid quantities.
  */
-app.post('/api/cart/validate', (req: Request, res: Response) => {
+app.post('/api/cart/validate', async (req: Request, res: Response) => {
   try {
     const { items, couponCode } = req.body;
 
@@ -173,20 +183,28 @@ app.post('/api/cart/validate', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Cart is empty or invalid format.' });
     }
 
+    // Authoritative prices come from Firestore `products` (fail closed if unreadable)
+    let catalog: Map<string, any>;
+    try {
+      catalog = await getProductsByIds(items.map((i: any) => i?.productId));
+    } catch (catErr) {
+      console.error('Cart validation could not read the catalogue:', catErr);
+      return res.status(503).json(CATALOG_UNAVAILABLE);
+    }
+
     let calculatedSubtotal = 0;
     const validatedItems: any[] = [];
 
     for (const item of items) {
-      // 1. Verify existence in active canonical catalog
-      const serverProduct = ACTIVE_CANONICAL_CATALOG_MAP[item.productId];
+      // 1. Verify existence in the live catalogue
+      const serverProduct = typeof item?.productId === 'string' ? catalog.get(item.productId.trim()) : undefined;
       if (!serverProduct) {
-        const historical = CANONICAL_CATALOG_MAP[item.productId];
-        if (historical) {
-          return res.status(400).json({
-            error: `${historical.name} is a historical product and is no longer available in the active catalogue.`
-          });
-        }
-        return res.status(400).json({ error: `Product ${item.productId} not found.` });
+        return res.status(400).json({ error: `Product ${item?.productId} not found.` });
+      }
+      if (serverProduct.isHistorical) {
+        return res.status(400).json({
+          error: `${serverProduct.name} is a historical product and is no longer available in the active catalogue.`
+        });
       }
 
       // 2. Reject inactive or historical items
@@ -197,12 +215,7 @@ app.post('/api/cart/validate', (req: Request, res: Response) => {
       }
 
       // 3. Strict Retail Price Validation - Never allow missing, zero, or unverified prices
-      if (
-        typeof serverProduct.price !== 'number' ||
-        !Number.isFinite(serverProduct.price) ||
-        serverProduct.price <= 0 ||
-        serverProduct.priceStatus === 'missing'
-      ) {
+      if (!hasVerifiedPrice(serverProduct)) {
         return res.status(400).json({
           error: `${serverProduct.name} does not have a verified retail price and is currently unavailable for online purchase.`
         });
@@ -316,15 +329,23 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
     const idempDocId =
       'order_' + crypto.createHash('sha256').update(cleanIdempotencyKey).digest('hex');
 
-    // 2. Strict Retail Price and Quantity Validation across Active Canonical Catalogue
+    // 2. Strict Retail Price and Quantity Validation against the live Firestore catalogue
+    let catalog: Map<string, any>;
+    try {
+      catalog = await getProductsByIds(items.map((i: any) => i?.productId));
+    } catch (catErr) {
+      console.error('Order creation could not read the catalogue:', catErr);
+      return res.status(503).json(CATALOG_UNAVAILABLE);
+    }
     let subtotal = 0;
     for (const item of items) {
       if (!item || typeof item.productId !== 'string' || !item.productId.trim()) {
         return res.status(400).json({ error: 'Invalid item format in order payload.' });
       }
       const prodId = item.productId.trim();
-      const prod = ACTIVE_CANONICAL_CATALOG_MAP[prodId];
-      if (!prod) {
+      const prod = catalog.get(prodId);
+      // Historical products answer exactly like unknown ones (as with the old static catalogue)
+      if (!prod || prod.isHistorical) {
         return res.status(400).json({
           error: `Product ${prodId} is not available in the active catalogue.`
         });
@@ -335,12 +356,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
         });
       }
 
-      if (
-        typeof prod.price !== 'number' ||
-        !Number.isFinite(prod.price) ||
-        prod.price <= 0 ||
-        prod.priceStatus === 'missing'
-      ) {
+      if (!hasVerifiedPrice(prod)) {
         return res.status(400).json({
           error: `${prod.name} does not have a verified retail price and cannot be ordered.`
         });
@@ -1941,7 +1957,14 @@ app.post('/api/ai/find-flame', async (req: Request, res: Response) => {
   try {
     const { feeling, moment, scentPreference, intensity } = req.body;
 
-    // Deterministic baseline match from canonical catalog
+    let SERVER_CATALOG: Record<string, any>;
+    try {
+      SERVER_CATALOG = await getActiveCatalog();
+    } catch {
+      return res.status(503).json(CATALOG_UNAVAILABLE);
+    }
+
+    // Deterministic baseline match from the live catalogue
     let chosenId = 'jumbo-tealight-mogra';
     if (scentPreference === 'Woody' || scentPreference === 'Earthy' || feeling === 'Grounded' || moment === 'Morning reset') {
       chosenId = 'royal-urli';
@@ -1955,7 +1978,12 @@ app.post('/api/ai/find-flame', async (req: Request, res: Response) => {
       chosenId = 'golden-mogra-jar';
     }
 
-    const baselineProduct = SERVER_CATALOG[chosenId] || SERVER_CATALOG['jumbo-tealight-mogra'];
+    const baselineProduct =
+      SERVER_CATALOG[chosenId] || SERVER_CATALOG['jumbo-tealight-mogra'] || Object.values(SERVER_CATALOG)[0];
+    if (!baselineProduct) {
+      return res.status(404).json({ error: 'No products are available in the active catalogue.' });
+    }
+    chosenId = baselineProduct.id;
 
     // Try Gemini if API key available
     if (process.env.GEMINI_API_KEY) {
@@ -2045,6 +2073,12 @@ app.post('/api/ai/ritual', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing productId parameter.' });
     }
 
+    let SERVER_CATALOG: Record<string, any>;
+    try {
+      SERVER_CATALOG = await getActiveCatalog();
+    } catch {
+      return res.status(503).json(CATALOG_UNAVAILABLE);
+    }
     const candle = SERVER_CATALOG[productId];
     if (!candle || candle.isActive === false || candle.isHistorical) {
       return res.status(404).json({
@@ -2120,6 +2154,14 @@ app.post('/api/ai/assistant', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing message prompt.' });
     }
 
+    let SERVER_CATALOG: Record<string, any>;
+    try {
+      SERVER_CATALOG = await getActiveCatalog();
+    } catch {
+      return res.status(503).json(CATALOG_UNAVAILABLE);
+    }
+    const onlyActive = (ids: string[]) => ids.filter((id) => SERVER_CATALOG[id]);
+
     if (process.env.GEMINI_API_KEY) {
       try {
         const catalogSummary = Object.entries(SERVER_CATALOG)
@@ -2145,14 +2187,14 @@ Brand Standards:
           contents: `${systemPrompt}\n\nCustomer question: ${message}`,
         });
 
-        const mentionedIds = CANONICAL_PRODUCTS
-          .filter((p) => p.isActive && (aiResponse.text || '').toLowerCase().includes(p.name.toLowerCase()))
+        const mentionedIds = Object.values(SERVER_CATALOG)
+          .filter((p: any) => (aiResponse.text || '').toLowerCase().includes(String(p.name).toLowerCase()))
           .map((p) => p.id)
           .slice(0, 3);
 
         return res.json({
           reply: aiResponse.text?.trim() || 'I am here to help you discover the right candle and ritual for your space.',
-          suggestedProducts: mentionedIds.length > 0 ? mentionedIds : ['jumbo-tealight-mogra', 'floral-lotus-urli'],
+          suggestedProducts: mentionedIds.length > 0 ? mentionedIds : onlyActive(['jumbo-tealight-mogra', 'floral-lotus-urli']),
         });
       } catch (geminiErr) {
         console.warn('Assistant fallback:', geminiErr);
@@ -2177,7 +2219,7 @@ Brand Standards:
       suggested = ['ganpati-bappa-hamper'];
     }
 
-    return res.json({ reply, suggestedProducts: suggested });
+    return res.json({ reply, suggestedProducts: onlyActive(suggested) });
   } catch (err: any) {
     return res.status(500).json({ error: 'Assistant service temporarily unavailable.' });
   }
@@ -2189,6 +2231,13 @@ Brand Standards:
 app.post('/api/ai/gift', async (req: Request, res: Response) => {
   try {
     const { recipient, occasion, feeling } = req.body;
+
+    let SERVER_CATALOG: Record<string, any>;
+    try {
+      SERVER_CATALOG = await getActiveCatalog();
+    } catch {
+      return res.status(503).json(CATALOG_UNAVAILABLE);
+    }
 
     let chosenId = 'ganpati-bappa-hamper';
     if (feeling === 'Sensual' || recipient === 'Partner') {
@@ -2208,7 +2257,7 @@ app.post('/api/ai/gift', async (req: Request, res: Response) => {
       productId: prod.id,
       productName: prod.name,
       giftMessage: `A thoughtful gift for your ${recipient || 'special person'} on their ${occasion || 'celebration'}—inviting gentle ${feeling?.toLowerCase() || 'calm'} into their space.`,
-      price: prod.priceStatus !== 'missing' && prod.price > 0 ? prod.price : undefined,
+      price: hasVerifiedPrice(prod) ? prod.price : undefined,
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Gift finder error.' });
@@ -2218,11 +2267,18 @@ app.post('/api/ai/gift', async (req: Request, res: Response) => {
 /**
  * 9. PHASE 3: Product Comparison ("Which one is right for me?")
  */
-app.post('/api/ai/compare', (req: Request, res: Response) => {
+app.post('/api/ai/compare', async (req: Request, res: Response) => {
   try {
     const { productIds } = req.body;
     if (!Array.isArray(productIds) || productIds.length === 0) {
       return res.status(400).json({ error: 'Please provide at least one product ID to compare.' });
+    }
+
+    let SERVER_CATALOG: Record<string, any>;
+    try {
+      SERVER_CATALOG = await getActiveCatalog();
+    } catch {
+      return res.status(503).json(CATALOG_UNAVAILABLE);
     }
 
     const compared: any[] = [];
@@ -2236,7 +2292,7 @@ app.post('/api/ai/compare', (req: Request, res: Response) => {
       compared.push({
         id: p.id,
         name: p.name,
-        price: p.priceStatus !== 'missing' && p.price > 0 ? p.price : undefined,
+        price: hasVerifiedPrice(p) ? p.price : undefined,
         priceStatus: p.priceStatus,
         scentFamily: p.scentFamily || 'Not specified',
         burnTime: p.burnTime || 'Not specified',

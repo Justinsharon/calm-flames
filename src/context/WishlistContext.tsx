@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Product } from '../types';
-import { PRODUCTS } from '../data/products';
+import { useCatalog } from './CatalogContext';
 import { auth, db } from '../lib/firebase';
 import { doc, getDocs, collection, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
@@ -28,6 +28,7 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   });
 
+  const { products } = useCatalog();
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
   const [lastFeedback, setLastFeedback] = useState<{ message: string; visible: boolean } | null>(null);
 
@@ -86,7 +87,7 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const toggleWishlist = (productId: string) => {
-    const product = PRODUCTS.find((p) => p.id === productId);
+    const product = products.find((p) => p.id === productId);
     const prodName = product ? product.name : 'Candle';
 
     setWishlist((prev) => {
@@ -118,7 +119,8 @@ export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const isInWishlist = (productId: string) => wishlist.includes(productId);
 
-  const wishlistProducts = PRODUCTS.filter((p) => wishlist.includes(p.id));
+  // Resolved against the live catalogue, so saved items always show current price/photo.
+  const wishlistProducts = products.filter((p) => wishlist.includes(p.id));
 
   return (
     <WishlistContext.Provider

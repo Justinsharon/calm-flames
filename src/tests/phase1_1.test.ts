@@ -7,7 +7,7 @@ import {
   HISTORICAL_PRODUCTS,
   getActiveCanonicalProductById,
   getCanonicalProductById
-} from '../data/canonicalCatalog';
+} from '../../scripts/catalog/canonicalCatalog';
 
 describe('The Calm Flame — Comprehensive Phase 1.1 Remediation Test Suite', () => {
   // ========================================================

@@ -1,0 +1,24 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Admins carry the custom claim `admin: true` (set by `npm run grant-admin -- <email>`, which
+    // also sets role "admin" on their Firestore customers/{uid} document). A claim is used because
+    // Storage rules cannot read the app's named Firestore database.
+    function isAdmin() {
+      return request.auth != null && request.auth.token.get('admin', false) == true;
+    }
+
+    // Product photos: anyone can read; only admins can upload / replace / delete.
+    match /products/{allPaths=**} {
+      allow read: if true;
+      allow create, update: if isAdmin()
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow delete: if isAdmin();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

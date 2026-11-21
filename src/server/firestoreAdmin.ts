@@ -20,6 +20,7 @@ import {
   type DocumentSnapshot,
   type Transaction,
 } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 let cachedDb: Firestore | null = null;
@@ -42,21 +43,34 @@ function databaseId(): string | undefined {
   return process.env.FIRESTORE_DATABASE_ID || (firebaseConfig as any).firestoreDatabaseId || undefined;
 }
 
+export function storageBucketName(): string {
+  return process.env.FIREBASE_STORAGE_BUCKET || (firebaseConfig as any).storageBucket;
+}
+
+export function getAdminApp(): App {
+  const existing = getApps().find((a) => a.name === 'tcf-server');
+  if (existing) return existing;
+  const usingEmulators = Boolean(process.env.FIRESTORE_EMULATOR_HOST || process.env.FIREBASE_STORAGE_EMULATOR_HOST);
+  return initializeApp(
+    usingEmulators
+      ? { projectId: projectId(), storageBucket: storageBucketName() }
+      : { credential: applicationDefault(), projectId: projectId(), storageBucket: storageBucketName() },
+    'tcf-server'
+  );
+}
+
+/** Firebase Storage bucket (product photos). */
+export function getAdminBucket() {
+  return getStorage(getAdminApp()).bucket(storageBucketName());
+}
+
 export function getAdminDb(): Firestore {
   if (isFirestoreDisabled()) {
     throw new Error('Firestore unavailable: durable storage disabled (FIRESTORE_DISABLED is set).');
   }
   if (cachedDb) return cachedDb;
 
-  const existing = getApps().find((a) => a.name === 'tcf-server');
-  const app: App =
-    existing ||
-    initializeApp(
-      process.env.FIRESTORE_EMULATOR_HOST
-        ? { projectId: projectId() }
-        : { credential: applicationDefault(), projectId: projectId() },
-      'tcf-server'
-    );
+  const app = getAdminApp();
 
   const dbId = databaseId();
   cachedDb = dbId ? getFirestore(app, dbId) : getFirestore(app);

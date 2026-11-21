@@ -1,167 +1,24 @@
-import { Product, MoodDiscoveryItem, BrandCategoryItem } from '../types';
-import {
-  CANONICAL_PRODUCTS,
-  HISTORICAL_PRODUCTS as CANONICAL_HISTORICAL,
-  CanonicalProduct
-} from './canonicalCatalog';
+/**
+ * Static SITE content: brand copy, category tiles, mood prompts, journal articles and the
+ * decorative artwork used by the hero / story / category sections.
+ *
+ * Product data (names, prices, stock, photos) does NOT live here. It is loaded from Firestore
+ * `products` (see src/context/CatalogContext.tsx). Product IDs below are content references
+ * that are resolved against the live catalogue at runtime.
+ */
+import { BrandCategoryItem, MoodDiscoveryItem } from '../types';
 
-import heroImg from '../assets/images/hero_calm_flame_1791022837105.jpg';
-import jasmineSageImg from '../assets/images/product_jasmine_sage_1791022851970.jpg';
-import sandalwoodRoseImg from '../assets/images/product_sandalwood_rose_1791022868390.jpg';
-import nagChampaImg from '../assets/images/product_nag_champa_1791022883447.jpg';
-import ritualCollectionImg from '../assets/images/collection_ritual_1791022895596.jpg';
-
-// The Brand Category image assets
-import catAromatherapyImg from '../assets/images/cat_aromatherapy_candles_1791039137570.jpg';
-import catMassageImg from '../assets/images/cat_massage_candles_1791039154523.jpg';
-import catRitualImg from '../assets/images/cat_ritual_collection_1791039168747.jpg';
-import catGiftingImg from '../assets/images/cat_gifting_1791039186328.jpg';
-import catMoodImg from '../assets/images/cat_shop_by_mood_1791039205051.jpg';
-import catScentImg from '../assets/images/cat_shop_by_scent_1791039221149.jpg';
-
-// Canonical lookbook product photographs
-import jumboTealightsImg from '../assets/images/jumbo_tealights_1791107239446.jpg';
-import goldenMograJarImg from '../assets/images/golden_mogra_jar_1791107483643.jpg';
-import peonyBloomImg from '../assets/images/peony_bloom_candle_1791107531344.jpg';
-import lotusBloomBowlImg from '../assets/images/lotus_bloom_bowl_1791107291224.jpg';
-import mandalaTinImg from '../assets/images/mandala_tin_1791107355136.jpg';
-import laddooShotImg from '../assets/images/laddoo_shot_1791107369511.jpg';
-import rasmalaiImg from '../assets/images/rasmalai_candle_1791107387057.jpg';
-import floatingDaisyImg from '../assets/images/floating_daisy_1791107499165.jpg';
-import ganpatiSachetImg from '../assets/images/ganpati_sachet_1791107415334.jpg';
-import waxSachetsImg from '../assets/images/wax_sachets_1791107430468.jpg';
+// Decorative brand artwork (hero, story, category tiles). Not used for product listings.
 import lotusUrliImg from '../assets/images/lotus_urli_1791107260236.jpg';
-import goldenFoilUrliImg from '../assets/images/golden_foil_urli_1791107277725.jpg';
+import jumboTealightsImg from '../assets/images/jumbo_tealights_1791107239446.jpg';
 import royalUrliImg from '../assets/images/royal_urli_1791107306618.jpg';
 import modakCandlesImg from '../assets/images/modak_candles_1791107322524.jpg';
-import laddooCandlesImg from '../assets/images/laddoo_candles_1791107337185.jpg';
-import mithaiBowlImg from '../assets/images/mithai_bowl_1791107516766.jpg';
-import ganpatiHamperImg from '../assets/images/ganpati_hamper_1791107402793.jpg';
 import corporateHamperImg from '../assets/images/corporate_hamper_1791107468493.jpg';
+import peonyBloomImg from '../assets/images/peony_bloom_candle_1791107531344.jpg';
 
-export {
-  corporateHamperImg,
-  lotusUrliImg,
-  jumboTealightsImg,
-  royalUrliImg,
-  ganpatiHamperImg,
-  modakCandlesImg,
-  laddooCandlesImg,
-  goldenMograJarImg
-};
+export { lotusUrliImg, jumboTealightsImg, royalUrliImg, modakCandlesImg };
+
 export const HERO_ASSET = lotusUrliImg;
-
-const PRODUCT_IMAGE_MAP: Record<string, { image: string; galleryImages: string[] }> = {
-  'jumbo-tealight-mogra': { image: jumboTealightsImg, galleryImages: [jumboTealightsImg, goldenMograJarImg] },
-  'jumbo-tealight-lotus-pond': { image: jumboTealightsImg, galleryImages: [jumboTealightsImg, lotusBloomBowlImg] },
-  'golden-mogra-jar': { image: goldenMograJarImg, galleryImages: [goldenMograJarImg, jumboTealightsImg] },
-  'peony-bloom': { image: peonyBloomImg, galleryImages: [peonyBloomImg, lotusBloomBowlImg] },
-  'lotus-bloom': { image: lotusBloomBowlImg, galleryImages: [lotusBloomBowlImg, lotusUrliImg] },
-  'mandala-tin': { image: mandalaTinImg, galleryImages: [mandalaTinImg, royalUrliImg] },
-  'laddoo-shot': { image: laddooShotImg, galleryImages: [laddooShotImg, laddooCandlesImg] },
-  'rasmalai': { image: rasmalaiImg, galleryImages: [rasmalaiImg, mithaiBowlImg] },
-  'floating-daisy': { image: floatingDaisyImg, galleryImages: [floatingDaisyImg, lotusUrliImg] },
-  'ganpati-wax-sachet': { image: ganpatiSachetImg, galleryImages: [ganpatiSachetImg, waxSachetsImg] },
-  'golden-foil-wax-sachet': { image: waxSachetsImg, galleryImages: [waxSachetsImg, goldenFoilUrliImg] },
-  'sunflower-wax-sachet': { image: waxSachetsImg, galleryImages: [waxSachetsImg, ganpatiSachetImg] },
-  'rose-wax-sachet': { image: waxSachetsImg, galleryImages: [waxSachetsImg, peonyBloomImg] },
-  'tulip-wax-sachet': { image: waxSachetsImg, galleryImages: [waxSachetsImg, peonyBloomImg] },
-  'orange-cinnamon-wax-sachet': { image: waxSachetsImg, galleryImages: [waxSachetsImg, royalUrliImg] },
-  'daisy-wax-sachet': { image: waxSachetsImg, galleryImages: [waxSachetsImg, floatingDaisyImg] },
-  'floral-lotus-urli': { image: lotusUrliImg, galleryImages: [lotusUrliImg, lotusBloomBowlImg] },
-  'golden-foil-lotus-urli': { image: goldenFoilUrliImg, galleryImages: [goldenFoilUrliImg, royalUrliImg] },
-  'lotus-pond-urli': { image: lotusUrliImg, galleryImages: [lotusUrliImg, jumboTealightsImg] },
-  'mogra-lotus-urli': { image: lotusUrliImg, galleryImages: [lotusUrliImg, goldenMograJarImg] },
-  'lotus-bloom-bowl': { image: lotusBloomBowlImg, galleryImages: [lotusBloomBowlImg, lotusUrliImg] },
-  'lotus-bloom-bowl-red': { image: lotusBloomBowlImg, galleryImages: [lotusBloomBowlImg, lotusUrliImg] },
-  'royal-urli': { image: royalUrliImg, galleryImages: [royalUrliImg, goldenFoilUrliImg] },
-  'mithai-bowl': { image: mithaiBowlImg, galleryImages: [mithaiBowlImg, laddooCandlesImg] },
-  'modak': { image: modakCandlesImg, galleryImages: [modakCandlesImg, ganpatiHamperImg] },
-  'laddoo': { image: laddooCandlesImg, galleryImages: [laddooCandlesImg, mithaiBowlImg] },
-  'pack-of-1-laddoo': { image: laddooCandlesImg, galleryImages: [laddooCandlesImg, corporateHamperImg] },
-  'pack-of-2-laddoo': { image: laddooCandlesImg, galleryImages: [laddooCandlesImg, corporateHamperImg] },
-  'pack-of-4-laddoo': { image: laddooCandlesImg, galleryImages: [laddooCandlesImg, corporateHamperImg] },
-  'pack-of-4-modak-brown': { image: modakCandlesImg, galleryImages: [modakCandlesImg, ganpatiHamperImg] },
-  'pack-of-4-laddoo-brown': { image: laddooCandlesImg, galleryImages: [laddooCandlesImg, corporateHamperImg] },
-  'pack-of-4-laddoo-premium': { image: laddooCandlesImg, galleryImages: [laddooCandlesImg, corporateHamperImg] },
-  'ganpati-bappa-hamper': { image: ganpatiHamperImg, galleryImages: [ganpatiHamperImg, modakCandlesImg, corporateHamperImg] }
-};
-
-const HISTORICAL_IMAGE_MAP: Record<string, { image: string; galleryImages: string[] }> = {
-  'jasmine-sage': { image: jasmineSageImg, galleryImages: [jasmineSageImg] },
-  'sandalwood-rose': { image: sandalwoodRoseImg, galleryImages: [sandalwoodRoseImg] },
-  'nag-champa': { image: nagChampaImg, galleryImages: [nagChampaImg] },
-  'ritual-collection': { image: ritualCollectionImg, galleryImages: [ritualCollectionImg] }
-};
-
-function mapCanonicalToProduct(cp: CanonicalProduct, isHistorical: boolean = false): Product {
-  const imgData = isHistorical ? HISTORICAL_IMAGE_MAP[cp.id] : PRODUCT_IMAGE_MAP[cp.id];
-  const image = imgData ? imgData.image : cp.imagePath;
-  const galleryImages = imgData ? imgData.galleryImages : [image];
-
-  return {
-    id: cp.id,
-    slug: cp.slug,
-    name: cp.name,
-    tagline: cp.tagline,
-    price: cp.price,
-    originalPrice: cp.originalPrice,
-    priceStatus: cp.priceStatus,
-    primaryCategory: cp.primaryCategory,
-    subcategory: cp.subcategory,
-    collections: cp.collections,
-    tags: cp.tags,
-    weight: cp.weight,
-    dimensions: cp.dimensions,
-    fragrance: cp.fragrance,
-    burnTime: cp.burnTime,
-    scentFamily: cp.scentFamily,
-    shortDescription: cp.shortDescription,
-    longDescription: cp.longDescription,
-    howItFeels: cp.howItFeels,
-    image,
-    galleryImages,
-    customisation: cp.customisation,
-    inStock: cp.inStock ?? false,
-    inventoryStatus: cp.inventoryStatus ?? 'unknown',
-    availableStock: cp.availableStock,
-    featured: cp.featured,
-    needsImageAsset: false,
-    isActive: cp.isActive,
-    isHistorical: cp.isHistorical,
-    categories: cp.categories,
-    moods: cp.moods
-  };
-}
-
-/**
- * Historical/Placeholder products from original website baseline.
- * Inactive in primary storefront catalog; preserved to protect order history and database references.
- */
-export const HISTORICAL_PRODUCTS: Product[] = CANONICAL_HISTORICAL.map((p) =>
-  mapCanonicalToProduct(p, true)
-);
-
-/**
- * Exactly 33 Canonical Real Products from The Calm Flame Festive Collection 2026 Authoritative Catalogue.
- * Factual data only. Wholesale prices are strictly omitted.
- */
-export const REAL_PRODUCTS: Product[] = CANONICAL_PRODUCTS.map((p) =>
-  mapCanonicalToProduct(p, false)
-);
-
-/**
- * All active catalog products for storefront display (exactly 33 products)
- */
-export const PRODUCTS: Product[] = REAL_PRODUCTS;
-
-/**
- * All products including historical records for backwards compatibility
- */
-export const ALL_PRODUCTS_WITH_HISTORICAL: Product[] = [
-  ...REAL_PRODUCTS,
-  ...HISTORICAL_PRODUCTS
-];
 
 export const BRAND_CATEGORIES: BrandCategoryItem[] = [
   {
@@ -233,7 +90,8 @@ export const BRAND_CATEGORIES: BrandCategoryItem[] = [
     subtitle: 'Find your feeling',
     image: peonyBloomImg,
     description: 'Every mood deserves its own space, its own scent, its own energy. Calm, Grounded, Uplifted, Sleepy, or Sensual.',
-    associatedProductIds: REAL_PRODUCTS.map((p) => p.id),
+    // All live products (membership is not a fixed list)
+    associatedProductIds: [],
     actionType: 'mood'
   },
   {
@@ -242,7 +100,8 @@ export const BRAND_CATEGORIES: BrandCategoryItem[] = [
     subtitle: 'Follow your nose',
     image: royalUrliImg,
     description: 'Follow the fragrance that speaks to you. From floral and soothing to earthy and grounding, each scent tells its own story.',
-    associatedProductIds: REAL_PRODUCTS.map((p) => p.id),
+    // All live products (membership is not a fixed list)
+    associatedProductIds: [],
     actionType: 'scent'
   }
 ];

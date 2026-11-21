@@ -1,4 +1,9 @@
-import { MoodKey, ScentFamily, BrandCategoryKey, InventoryStatus } from '../types';
+/**
+ * Source data for scripts/migrate-catalog.ts ONLY. Not imported by the storefront or the server:
+ * the live catalogue (prices, stock, photos, active flags) is Firestore `products`.
+ * Prices here are the original catalogue values (all 33 active products unpriced).
+ */
+import { MoodKey, ScentFamily, BrandCategoryKey, InventoryStatus } from '../../src/types';
 
 export interface CanonicalProduct {
   id: string;

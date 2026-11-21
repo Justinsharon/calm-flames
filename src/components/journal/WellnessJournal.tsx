@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { JOURNAL_ARTICLES } from '../../data/products';
+import { JOURNAL_ARTICLES } from '../../data/siteContent';
 import { ArrowRight, BookOpen, X, Clock } from 'lucide-react';
 
 export const WellnessJournal: React.FC = () => {

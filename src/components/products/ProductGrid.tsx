@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Product, BrandCategoryKey } from '../../types';
 import { ProductCard } from './ProductCard';
 import { getProductsByCategory } from '../../services/recommendationEngine';
-import { PRODUCTS, BRAND_CATEGORIES } from '../../data/products';
+import { BRAND_CATEGORIES } from '../../data/siteContent';
+import { useCatalog } from '../../context/CatalogContext';
 import { Sparkles, X, Search } from 'lucide-react';
 
 interface ProductGridProps {
@@ -20,12 +21,13 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [scentFilter, setScentFilter] = useState<string>('all');
+  const { products, loading, error } = useCatalog();
 
   // Filter based on selectedCategory
   const categoryFiltered =
     selectedCategory === 'all'
-      ? PRODUCTS
-      : getProductsByCategory(selectedCategory);
+      ? products
+      : getProductsByCategory(products, selectedCategory);
 
   // Multi-attribute search filter (Section 18)
   const searchFiltered = categoryFiltered.filter((p) => {
@@ -146,6 +148,18 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           </div>
         )}
 
+        {/* Catalogue loading / error state */}
+        {loading && (
+          <p className="text-center py-16 text-xs text-[#79716B]" role="status" aria-live="polite">
+            Loading the collection…
+          </p>
+        )}
+        {!loading && error && (
+          <p className="text-center py-16 text-xs text-[#79716B]" role="alert">
+            {error}
+          </p>
+        )}
+
         {/* Product Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-7">
           {finalFiltered.map((product) => (
@@ -157,7 +171,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           ))}
         </div>
 
-        {finalFiltered.length === 0 && (
+        {!loading && !error && finalFiltered.length === 0 && (
           <div className="text-center py-16 bg-[#F2ECE1]/40 rounded-2xl border border-[#E5DCCE] p-8 space-y-3">
             <p className="text-lg font-serif text-[#1F1B18]">No candles match this specific selection.</p>
             <button

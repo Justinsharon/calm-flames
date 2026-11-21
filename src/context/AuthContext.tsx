@@ -50,7 +50,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const ADMIN_EMAILS = ['justinsharon56@gmail.com'];
+// The admin role is read ONLY from the Firestore customers/{uid} document (`role: 'admin'`),
+// set with `npm run grant-admin -- <email>`. Users can never grant it to themselves
+// (enforced by firestore.rules).
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -61,7 +63,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Sync user profile from Firestore or bootstrap customer doc
   const loadCustomerProfile = async (firebaseUser: User) => {
-    const isBootstrappedAdmin = ADMIN_EMAILS.includes(firebaseUser.email?.toLowerCase() || '');
     const userDocRef = doc(db, 'customers', firebaseUser.uid);
 
     try {
@@ -73,7 +74,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           email: firebaseUser.email || data.email,
           fullName: data.firstName || data.fullName || firebaseUser.displayName || 'Calm Seeker',
           phone: data.phone || '',
-          role: isBootstrappedAdmin ? 'admin' : data.role || 'customer',
+          role: data.role === 'admin' ? 'admin' : 'customer',
           savedAddress: data.addresses?.[0] || data.savedAddress,
           preferences: data.preferences,
           createdAt: data.createdAt || new Date().toISOString()
@@ -85,7 +86,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           email: firebaseUser.email || '',
           fullName: firebaseUser.displayName || 'Calm Seeker',
           phone: '',
-          role: isBootstrappedAdmin ? 'admin' : 'customer',
+          role: 'customer',
           createdAt: new Date().toISOString(),
           preferences: {
             preferredMoods: ['calm', 'wind-down'],
@@ -113,7 +114,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         uid: firebaseUser.uid,
         email: firebaseUser.email || '',
         fullName: firebaseUser.displayName || 'Calm Seeker',
-        role: isBootstrappedAdmin ? 'admin' : 'customer',
+        role: 'customer',
         createdAt: new Date().toISOString()
       });
     }
@@ -141,13 +142,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUpWithEmail = async (email: string, pass: string, fullName: string) => {
     const cred = await createUserWithEmailAndPassword(auth, email, pass);
     const userDocRef = doc(db, 'customers', cred.user.uid);
-    const isBootstrappedAdmin = ADMIN_EMAILS.includes(email.toLowerCase());
 
     const initialData = {
       id: cred.user.uid,
       email,
       firstName: fullName,
-      role: isBootstrappedAdmin ? 'admin' : 'customer',
+      role: 'customer',
       createdAt: new Date().toISOString()
     };
 
@@ -161,7 +161,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       uid: cred.user.uid,
       email,
       fullName,
-      role: isBootstrappedAdmin ? 'admin' : 'customer',
+      role: 'customer',
       createdAt: initialData.createdAt
     });
 
@@ -219,9 +219,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const isAdmin =
-    profile?.role === 'admin' ||
-    ADMIN_EMAILS.includes(user?.email?.toLowerCase() || '');
+  const isAdmin = profile?.role === 'admin';
 
   return (
     <AuthContext.Provider

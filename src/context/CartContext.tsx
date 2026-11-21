@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { useCatalog } from './CatalogContext';
+import { hasVerifiedPrice } from '../lib/productMapping';
 import { Product, CartItem } from '../types';
 import { auth, db } from '../lib/firebase';
 import { doc, getDocs, collection, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
@@ -41,6 +43,21 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return [];
     }
   });
+
+  const { getProductById, loading: catalogLoading, error: catalogError } = useCatalog();
+
+  // Stored cart lines hold a product snapshot; always show the LIVE catalogue version (current
+  // price/photo). Once the catalogue has loaded, lines whose product is no longer active or no
+  // longer has a verified price are dropped from what the customer sees and pays for.
+  const resolvedCart = useMemo<CartItem[]>(() => {
+    if (catalogLoading || catalogError) return cart;
+    return cart
+      .map((item) => {
+        const live = getProductById(item.product.id);
+        return live ? { ...item, product: live } : null;
+      })
+      .filter((item): item is CartItem => item !== null && hasVerifiedPrice(item.product));
+  }, [cart, catalogLoading, catalogError, getProductById]);
 
   const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
   const [discount, setDiscount] = useState<number>(0);
@@ -191,8 +208,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setDiscount(0);
   };
 
-  const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const subtotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+  const totalItems = resolvedCart.reduce((sum, item) => sum + item.quantity, 0);
+  const subtotal = resolvedCart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   const shippingFee = subtotal >= FREE_SHIPPING_THRESHOLD || subtotal === 0 ? 0 : STANDARD_SHIPPING_FEE;
   const totalAmount = Math.max(0, subtotal - discount + shippingFee);
   const amountNeededForFreeShipping = Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal);
@@ -206,7 +223,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          items: cart.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
+          items: resolvedCart.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
           couponCode: codeClean
         })
       });
@@ -247,7 +264,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          items: cart.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
+          items: resolvedCart.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
           couponCode: appliedCoupon
         })
       });
@@ -268,7 +285,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <CartContext.Provider
       value={{
-        cart,
+        cart: resolvedCart,
         addToCart,
         removeFromCart,
         updateQuantity,
