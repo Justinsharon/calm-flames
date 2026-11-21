@@ -13,6 +13,25 @@ those. A checkout whose reservation was released before its order was saved fail
 the customer starts again. It is safe to run any number of times, concurrently, and alongside the
 webhook.
 
+## Abandoned payments (orders stuck in PAYMENT_PENDING)
+
+The same run also handles online-payment orders the customer never paid for. An order still
+`PAYMENT_PENDING` after `PAYMENT_PENDING_MAX_AGE_MINUTES` (default 30, never below 15):
+
+1. Razorpay is asked for that order's payments. If any is `captured` or `authorized`, the order is
+   left alone. If Razorpay can't be reached (or its keys aren't set), the order is skipped and
+   retried on the next run.
+2. Otherwise the order is marked `EXPIRED` and its reservation released, in one transaction that
+   re-checks the order is still pending (so a payment confirmed in between always wins).
+
+Cash-on-delivery orders are never expired.
+
+**Late payments are never dropped.** If a payment for an `EXPIRED` order arrives afterwards (webhook
+or the customer's browser), the order becomes `RECONCILIATION_REQUIRED` with `paymentStatus: PAID`
+and `reconciliationReason: PAID_AFTER_EXPIRY`. Its stock was already released, so decide by hand:
+fulfil it (if you have stock) or refund it in the Razorpay dashboard. Find them in Firestore:
+`orders` where `reconciliationReason == PAID_AFTER_EXPIRY`.
+
 ## Run it
 
 Manually, from your computer:

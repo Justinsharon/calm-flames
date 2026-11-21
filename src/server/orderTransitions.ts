@@ -51,6 +51,28 @@ export async function confirmOrderPaymentFromVerify(args: {
         error: `Order is ${order.status} and cannot be marked paid. Reconciliation required.`
       };
     }
+    // Late payment for an order the abandoned-order sweeper EXPIRED (stock already released):
+    // record it and hold for manual fulfil-or-refund, never drop it.
+    if (order.status === 'EXPIRED') {
+      if (order.razorpayOrderId !== args.razorpayOrderId) {
+        return { kind: 'rejected', httpStatus: 400, status: 'FAILED', error: 'Razorpay order ID does not match stored order record.' };
+      }
+      const now = new Date().toISOString();
+      tx.update(orderRef, {
+        paymentStatus: 'PAID',
+        status: 'RECONCILIATION_REQUIRED',
+        reconciliationReason: 'PAID_AFTER_EXPIRY',
+        razorpayPaymentId: args.razorpayPaymentId,
+        paidAfterExpiryAt: now,
+        updatedAt: now
+      });
+      return {
+        kind: 'rejected',
+        httpStatus: 202,
+        status: 'RECONCILIATION_REQUIRED',
+        error: 'Payment received after the order expired. The store will confirm or refund it shortly.'
+      };
+    }
     if (order.status !== 'PAYMENT_PENDING') {
       return {
         kind: 'rejected',
