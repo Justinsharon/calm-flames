@@ -20,15 +20,16 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
 1. `npm install` fails: `esbuild@^0.25` conflicts with Vite 8 (needs ^0.27). Bun works; npm must work for Cloud Run.
 2. Server uses the **client** Firebase SDK unauthenticated; Firestore rules deny its order/inventory writes.
    Must move to `firebase-admin` with a service account / Cloud Run default credentials.
-3. Storefront reads `src/data/products.ts` (static). `fetchLiveProducts()` exists but is never used.
-4. Server validates prices against `src/data/canonicalCatalog.ts` (static), not Firestore.
-5. Product images are bundled from `src/assets/images`; admin cannot upload photos.
+3. ~~Storefront reads static product data.~~ Fixed in Phase 3 (`CatalogContext`, realtime Firestore).
+4. ~~Server validates prices against the static catalogue.~~ Fixed in Phase 3 (`src/server/catalogService.ts`).
+5. ~~Product images bundled; admin cannot upload photos.~~ Fixed in Phase 3 (Storage + admin upload).
+   Six images stay bundled as decorative hero/story/category artwork (`src/data/siteContent.ts`).
 6. 33 of 37 products unpriced (owner to fill in Firebase).
-7. `App.tsx` calls `seedInitialCatalogIfNeeded()` on every visitor load — move to an admin-only script.
+7. ~~`App.tsx` seeds the catalogue on every visitor load.~~ Fixed in Phase 3 (`scripts/migrate-catalog.ts`).
 8. Phase 1.2.2 gaps in `server.ts`: `payment.failed` skips amount/currency checks when absent (~L1244, ~L1446);
    orphaned mapping `setDoc` outside a transaction (~L556); unfenced fallback `updateDoc` (~L570, ~L575).
 9. 6 tests time out hitting live Firestore; concurrency tests assert validation, not final DB state.
-10. Admin email hard-coded in `src/context/AuthContext.tsx`.
+10. ~~Admin email hard-coded.~~ Fixed in Phase 3: role from `customers/{uid}.role` (+ `admin` claim for Storage).
 11. **Must fix before Phase 4:** `/api/payments/verify` writes order status (`updateDoc`) without the
     claim/lease check, so it can race the webhook and overwrite a CANCELLED order.
 12. **Must fix before Phase 4:** inventory reservations left behind by crashed workers never expire
@@ -49,4 +50,8 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
 ## Commands
 - Install: `npm install` (until Phase 1 lands: `bun install`)
 - Dev: `npm run dev` (port 3000) · Typecheck: `npm run lint` · Tests: `npm test` · Build: `npm run build`
+- Emulator tests: `npm run test:emulator` (Firestore + Storage emulators; needs Java)
+- Catalogue migration: `npm run migrate:catalog [-- --dry-run]` · Admin: `npm run grant-admin -- <email>`
+  (steps: `docs/catalog-migration.md`) · Rules deploy uses `firebase.deploy.json` (named database)
+- Real checkout additionally requires `CHECKOUT_ENABLED=true` (Phase 4 only).
 - Env: copy `.env.example` → `.env.local`.
