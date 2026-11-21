@@ -13,17 +13,9 @@ import {
   fetchInventory,
 } from '../../server/inventoryService';
 import { app } from '../../../server';
+import { clearFirestore } from './helpers';
 
 const PRODUCT = 'jumbo-tealight-mogra';
-
-async function clearFirestore() {
-  const host = process.env.FIRESTORE_EMULATOR_HOST;
-  const project = process.env.FIREBASE_PROJECT_ID || 'demo-calm-flames';
-  const res = await fetch(`http://${host}/emulator/v1/projects/${project}/databases/(default)/documents`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) throw new Error(`Failed to clear emulator: ${res.status}`);
-}
 
 async function seedInventory(quantity: number) {
   await getAdminDb().collection('inventory').doc(PRODUCT).set({

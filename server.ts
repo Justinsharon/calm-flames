@@ -13,11 +13,12 @@ import {
 } from './src/data/canonicalCatalog';
 import {
   reserveInventoryTransaction,
-  releaseInventoryReservation,
   consumeInventoryReservation,
-  fetchInventory
+  fetchInventory,
+  planReservationRelease
 } from './src/server/inventoryService';
-import { getAdminDb, doc, getDoc, setDoc, updateDoc, runTransaction } from './src/server/firestoreAdmin';
+import { runTestHook } from './src/server/testHooks';
+import { getAdminDb, doc, getDoc, updateDoc, runTransaction } from './src/server/firestoreAdmin';
 
 dotenv.config();
 
@@ -46,6 +47,53 @@ const ai = new GoogleGenAI({
     },
   },
 });
+
+// Razorpay API calls must finish well inside the 60s claim/lease window so a slow gateway call
+// cannot outlive this worker's ownership of the attempt.
+const RAZORPAY_TIMEOUT_MS = 20 * 1000;
+
+/**
+ * Persist a Razorpay order ID -> internal order mapping for reconciliation WITHOUT ever
+ * overwriting an existing mapping. A conflicting existing mapping is left intact and the
+ * attempted one is kept in `orderMappingConflicts` for manual reconciliation.
+ */
+async function recordOrphanMapping(
+  razorpayOrderId: string,
+  orderNumber: string,
+  reason: string
+): Promise<'created' | 'exists_same' | 'conflict' | 'error'> {
+  try {
+    const db = getAdminDb();
+    return await runTransaction(db, async (tx) => {
+      const mapRef = doc(db, 'orderMappings', razorpayOrderId);
+      const mapSnap = await tx.get(mapRef);
+      const now = new Date().toISOString();
+      if (!mapSnap.exists()) {
+        tx.set(mapRef, {
+          orderNumber,
+          reconciliationRequired: true,
+          reconciliationReason: reason,
+          createdAt: now
+        });
+        return 'created';
+      }
+      const existing = mapSnap.data();
+      if (existing.orderNumber === orderNumber) return 'exists_same';
+      tx.set(doc(db, 'orderMappingConflicts', `${razorpayOrderId}__${orderNumber}`), {
+        razorpayOrderId,
+        attemptedOrderNumber: orderNumber,
+        existingOrderNumber: existing.orderNumber ?? null,
+        reconciliationRequired: true,
+        reconciliationReason: reason,
+        createdAt: now
+      });
+      return 'conflict';
+    });
+  } catch (e) {
+    console.error('Could not record Razorpay order mapping for reconciliation:', e);
+    return 'error';
+  }
+}
 
 const FREE_SHIPPING_THRESHOLD = 1500;
 const STANDARD_SHIPPING_FEE = 99;
@@ -389,8 +437,15 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
 
               if (existingOrderSnap.exists()) {
                 const ordData = existingOrderSnap.data();
+                // Any takeover of a stale claim bumps the generation and token so the
+                // previous worker's fenced writes can no longer succeed.
+                const takeover = {
+                  claimGeneration: (existing.claimGeneration || 1) + 1,
+                  claimToken: initialClaimToken
+                };
                 if (ordData.paymentStatus === 'PAID' || ordData.status === 'CONFIRMED') {
                   transaction.update(idempDocRef, {
+                    ...takeover,
                     status: 'COMPLETED',
                     updatedAt: new Date().toISOString()
                   });
@@ -398,6 +453,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
                 }
                 if (ordData.razorpayOrderId) {
                   transaction.update(idempDocRef, {
+                    ...takeover,
                     status: 'PAYMENT_PENDING',
                     razorpayOrderId: ordData.razorpayOrderId,
                     updatedAt: new Date().toISOString()
@@ -407,6 +463,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
                 // Order persisted in RESERVED state without razorpayOrderId:
                 // Uncertain if gateway call occurred; transition to RECONCILIATION_REQUIRED
                 transaction.update(idempDocRef, {
+                  ...takeover,
                   status: 'RECONCILIATION_REQUIRED',
                   reconciliationReason: 'ABANDONED_RESERVED_ORDER',
                   updatedAt: new Date().toISOString()
@@ -520,25 +577,62 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
     const workerClaimGeneration = claimResult.claimGeneration || 1;
     const workerClaimToken = claimResult.claimToken;
 
-    const fencedUpdateIdempotency = async (updates: Record<string, any>) => {
+    const orderDocRef = doc(db, 'orders', claimedOrderNumber);
+
+    const ownsClaim = (data: any, allowedStatuses: string[]) =>
+      Boolean(data) &&
+      data.claimGeneration === workerClaimGeneration &&
+      data.claimToken === workerClaimToken &&
+      allowedStatuses.includes(data.status);
+
+    /**
+     * Fenced failure/recovery write. In ONE transaction:
+     *  - verifies this worker still owns the claim (generation + token + expected status);
+     *  - optionally releases this attempt's reservation;
+     *  - updates the order (if it exists) and the idempotency record.
+     * A fenced-off (stale) worker writes nothing, except releasing its own orphaned reservation
+     * when no order document references it (the newer worker always uses a new reservation ID).
+     */
+    const failAttemptFenced = async (opts: {
+      allowedStatuses: string[];
+      release: boolean;
+      orderUpdates?: Record<string, any>;
+      idempUpdates: Record<string, any>;
+    }): Promise<{ fencedOff: boolean; released: boolean; error?: string }> => {
       try {
         return await runTransaction(db, async (tx) => {
-          const snap = await tx.get(idempDocRef);
-          if (!snap.exists()) return false;
-          const data = snap.data();
-          if (
-            data.claimGeneration !== workerClaimGeneration ||
-            data.claimToken !== workerClaimToken
-          ) {
-            return false;
+          const idempSnap = await tx.get(idempDocRef);
+          const orderSnap = await tx.get(orderDocRef);
+          const plan = opts.release ? await planReservationRelease(tx, db, claimedReservationId) : null;
+          const owns = idempSnap.exists() && ownsClaim(idempSnap.data(), opts.allowedStatuses);
+          const now = new Date().toISOString();
+
+          if (!owns) {
+            if (plan?.kind === 'release' && !orderSnap.exists()) {
+              plan.apply();
+              return { fencedOff: true, released: true };
+            }
+            return { fencedOff: true, released: false };
           }
-          tx.update(idempDocRef, { ...updates, updatedAt: new Date().toISOString() });
-          return true;
+
+          let released = false;
+          if (plan?.kind === 'release') {
+            plan.apply();
+            released = true;
+          }
+          if (orderSnap.exists() && opts.orderUpdates) {
+            tx.update(orderDocRef, { ...opts.orderUpdates, updatedAt: now });
+          }
+          tx.update(idempDocRef, { ...opts.idempUpdates, updatedAt: now });
+          return { fencedOff: false, released };
         });
-      } catch (e) {
-        return false;
+      } catch (e: any) {
+        console.error('Fenced failure write could not be committed:', e);
+        return { fencedOff: false, released: false, error: e?.message };
       }
     };
+
+    await runTestHook('order.afterClaim', { orderNumber: claimedOrderNumber, idempDocId });
 
     // 5. Perform live atomic inventory reservation in Firestore with idempotency claim fence
     const reservationResult = await reserveInventoryTransaction(
@@ -558,9 +652,11 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
           error: 'Worker was fenced off. Idempotency claim was reclaimed by another worker.'
         });
       }
-      await fencedUpdateIdempotency({
-        status: 'FAILED',
-        error: reservationResult.error
+      // Release in case an uncertain reservation commit actually landed (no-op if missing).
+      await failAttemptFenced({
+        allowedStatuses: ['CREATING'],
+        release: true,
+        idempUpdates: { status: 'FAILED', error: reservationResult.error || 'Reservation failed.' }
       });
       return res.status(400).json({
         error: reservationResult.error || 'Could not reserve inventory for requested items.'
@@ -569,8 +665,9 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
 
     const reservedItems = reservationResult.reservedItems || [];
 
+    await runTestHook('order.afterReserve', { orderNumber: claimedOrderNumber, idempDocId });
+
     // 6. Persist initial order record and update idempotency status in ONE fenced Firestore transaction
-    const orderDocRef = doc(db, 'orders', claimedOrderNumber);
     try {
       await runTransaction(db, async (tx) => {
         const idempSnap = await tx.get(idempDocRef);
@@ -614,15 +711,19 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
       });
     } catch (orderPersistErr: any) {
       console.error('Could not persist initial order in Firestore:', orderPersistErr);
-      await releaseInventoryReservation(claimedReservationId, reservedItems);
       if (orderPersistErr?.message?.includes('WORKER_FENCED_OFF')) {
+        // Stale worker: only its own orphaned reservation is released; nothing else is written.
+        await failAttemptFenced({ allowedStatuses: [], release: true, idempUpdates: {} });
         return res.status(409).json({
           error: 'Worker was fenced off. Attempt was reclaimed by a newer worker.'
         });
       }
-      await fencedUpdateIdempotency({
-        status: 'FAILED',
-        error: 'Order persistence failed.'
+      // The persist may have committed despite the error, so accept CREATING or RESERVED.
+      await failAttemptFenced({
+        allowedStatuses: ['CREATING', 'RESERVED'],
+        release: true,
+        orderUpdates: { status: 'FAILED' },
+        idempUpdates: { status: 'FAILED', error: 'Order persistence failed.' }
       });
       return res.status(500).json({
         error: 'Order persistence failed. Inventory reservation released.'
@@ -636,41 +737,46 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
 
     if (paymentMethod === 'razorpay') {
       if (!razorpayKeyId || !razorpayKeySecret) {
-        // Fail closed: Release reservation before returning error
-        await releaseInventoryReservation(claimedReservationId, reservedItems);
-        try {
-          await runTransaction(db, async (tx) => {
-            const idempSnap = await tx.get(idempDocRef);
-            if (idempSnap.exists()) {
-              const idData = idempSnap.data();
-              if (idData.claimGeneration === workerClaimGeneration && idData.claimToken === workerClaimToken) {
-                tx.update(orderDocRef, { status: 'FAILED', updatedAt: new Date().toISOString() });
-                tx.update(idempDocRef, { status: 'FAILED', updatedAt: new Date().toISOString() });
-              }
-            }
-          });
-        } catch (e) {}
+        // Fail closed: release reservation and fail the attempt in one fenced transaction
+        await failAttemptFenced({
+          allowedStatuses: ['RESERVED'],
+          release: true,
+          orderUpdates: { status: 'FAILED' },
+          idempUpdates: { status: 'FAILED' }
+        });
         return res.status(503).json({
           error: 'Razorpay payment gateway is not configured with active merchant credentials on the server. Online payment is unavailable.'
         });
       }
 
-      // Check fence before executing external network call to prevent duplicate provider orders
+      // Transactional fence check + lease heartbeat before the external call, so no stale worker
+      // creates a provider order and the 60s lease restarts from now.
+      let stillOwner = false;
       try {
-        const idempPreSnap = await getDoc(idempDocRef);
-        if (idempPreSnap.exists()) {
-          const preData = idempPreSnap.data();
-          if (
-            preData.claimGeneration !== workerClaimGeneration ||
-            preData.claimToken !== workerClaimToken
-          ) {
-            await releaseInventoryReservation(claimedReservationId, reservedItems);
-            return res.status(409).json({
-              error: 'Worker was fenced off before payment gateway interaction.'
-            });
-          }
-        }
-      } catch (e) {}
+        stillOwner = await runTransaction(db, async (tx) => {
+          const snap = await tx.get(idempDocRef);
+          if (!snap.exists() || !ownsClaim(snap.data(), ['RESERVED'])) return false;
+          tx.update(idempDocRef, { updatedAt: new Date().toISOString() });
+          return true;
+        });
+      } catch (e) {
+        console.error('Fence check before payment gateway failed:', e);
+        await failAttemptFenced({
+          allowedStatuses: ['RESERVED'],
+          release: true,
+          orderUpdates: { status: 'FAILED' },
+          idempUpdates: { status: 'FAILED', error: 'Fence check before gateway failed.' }
+        });
+        return res.status(503).json({ error: 'Durable storage unavailable before payment gateway interaction.' });
+      }
+      if (!stillOwner) {
+        // The order exists and now belongs to a newer claim; a stale worker must not touch it.
+        return res.status(409).json({
+          error: 'Worker was fenced off before payment gateway interaction.'
+        });
+      }
+
+      await runTestHook('order.beforeGateway', { orderNumber: claimedOrderNumber, idempDocId });
 
       try {
         const authHeader = Buffer.from(`${razorpayKeyId}:${razorpayKeySecret}`).toString('base64');
@@ -680,6 +786,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
             'Content-Type': 'application/json',
             Authorization: `Basic ${authHeader}`
           },
+          signal: AbortSignal.timeout(RAZORPAY_TIMEOUT_MS),
           body: JSON.stringify({
             amount: Math.round(total * 100),
             currency: 'INR',
@@ -695,20 +802,14 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
         if (!rzpResponse.ok) {
           const errBody = await rzpResponse.json().catch(() => ({}));
           console.error('Razorpay order creation API error:', errBody);
-          // Gateway definitively rejected order: release reservation and fail safely
-          await releaseInventoryReservation(claimedReservationId, reservedItems);
-          try {
-            await runTransaction(db, async (tx) => {
-              const idempSnap = await tx.get(idempDocRef);
-              if (idempSnap.exists()) {
-                const idData = idempSnap.data();
-                if (idData.claimGeneration === workerClaimGeneration && idData.claimToken === workerClaimToken) {
-                  tx.update(orderDocRef, { status: 'FAILED', updatedAt: new Date().toISOString() });
-                  tx.update(idempDocRef, { status: 'FAILED', updatedAt: new Date().toISOString() });
-                }
-              }
-            });
-          } catch (e) {}
+          // Gateway definitively rejected order: release reservation and fail, fenced
+          await runTestHook('order.afterGatewayReject', { orderNumber: claimedOrderNumber, idempDocId });
+          await failAttemptFenced({
+            allowedStatuses: ['RESERVED'],
+            release: true,
+            orderUpdates: { status: 'FAILED' },
+            idempUpdates: { status: 'FAILED' }
+          });
           return res.status(502).json({
             error: 'Failed to create payment order with Razorpay gateway. Please try again or select Cash on Delivery.'
           });
@@ -718,31 +819,21 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
         razorpayOrderId = rzpData.id;
       } catch (err: any) {
         console.error('Razorpay server order creation network exception or timeout:', err);
-        // Uncertain outcome: do NOT assume order was not created; hold for reconciliation
-        try {
-          await runTransaction(db, async (tx) => {
-            const idempSnap = await tx.get(idempDocRef);
-            if (idempSnap.exists()) {
-              const idData = idempSnap.data();
-              if (idData.claimGeneration === workerClaimGeneration && idData.claimToken === workerClaimToken) {
-                tx.update(orderDocRef, {
-                  status: 'RECONCILIATION_REQUIRED',
-                  reconciliationReason: 'RAZORPAY_CREATE_TIMEOUT',
-                  updatedAt: new Date().toISOString()
-                });
-                tx.update(idempDocRef, {
-                  status: 'RECONCILIATION_REQUIRED',
-                  updatedAt: new Date().toISOString()
-                });
-              }
-            }
-          });
-        } catch (e) {}
+        // Uncertain outcome: do NOT assume order was not created; keep the reservation and hold
+        // for reconciliation (fenced, so a stale worker cannot overwrite a newer claim)
+        await failAttemptFenced({
+          allowedStatuses: ['RESERVED'],
+          release: false,
+          orderUpdates: { status: 'RECONCILIATION_REQUIRED', reconciliationReason: 'RAZORPAY_CREATE_TIMEOUT' },
+          idempUpdates: { status: 'RECONCILIATION_REQUIRED', reconciliationReason: 'RAZORPAY_CREATE_TIMEOUT' }
+        });
         return res.status(502).json({
           error: 'Payment gateway communication timed out with uncertain outcome. Order held for reconciliation.'
         });
       }
     }
+
+    await runTestHook('order.afterGateway', { orderNumber: claimedOrderNumber, idempDocId, razorpayOrderId });
 
     // 8. Atomically Persist Razorpay Order ID & Order Mapping with claim fencing
     try {
@@ -751,11 +842,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
         if (!idempSnap.exists()) {
           throw new Error('WORKER_FENCED_OFF: Idempotency claim record missing.');
         }
-        const idempData = idempSnap.data();
-        if (
-          idempData.claimGeneration !== workerClaimGeneration ||
-          idempData.claimToken !== workerClaimToken
-        ) {
+        if (!ownsClaim(idempSnap.data(), ['RESERVED'])) {
           throw new Error('WORKER_FENCED_OFF: Claim was reclaimed during gateway interaction.');
         }
 
@@ -764,13 +851,25 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
           throw new Error('ORDER_MISSING');
         }
 
+        // Never overwrite an existing mapping that points at a different order.
+        let mappingExists = false;
+        if (razorpayOrderId) {
+          const mapSnap = await tx.get(doc(db, 'orderMappings', razorpayOrderId));
+          if (mapSnap.exists()) {
+            if (mapSnap.data().orderNumber !== claimedOrderNumber) {
+              throw new Error('MAPPING_CONFLICT: Razorpay order ID already mapped to another order.');
+            }
+            mappingExists = true;
+          }
+        }
+
         tx.update(orderDocRef, {
           razorpayOrderId: razorpayOrderId || null,
           status: 'PAYMENT_PENDING',
           updatedAt: new Date().toISOString()
         });
 
-        if (razorpayOrderId) {
+        if (razorpayOrderId && !mappingExists) {
           const mapDocRef = doc(db, 'orderMappings', razorpayOrderId);
           tx.set(mapDocRef, {
             orderNumber: claimedOrderNumber,
@@ -787,33 +886,32 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
     } catch (mappingErr: any) {
       console.error('Post-order persistence transaction error:', mappingErr);
       if (mappingErr?.message?.includes('WORKER_FENCED_OFF')) {
+        // The provider order exists but this worker no longer owns the attempt: keep the
+        // Razorpay ID for reconciliation without overwriting any existing mapping.
         if (razorpayOrderId) {
-          try {
-            const mapDocRef = doc(db, 'orderMappings', razorpayOrderId);
-            await setDoc(mapDocRef, {
-              orderNumber: claimedOrderNumber,
-              reconciliationRequired: true,
-              reconciliationReason: 'WORKER_FENCED_OFF_AFTER_GATEWAY_CREATE',
-              createdAt: new Date().toISOString()
-            });
-          } catch (e) {}
+          await recordOrphanMapping(razorpayOrderId, claimedOrderNumber, 'WORKER_FENCED_OFF_AFTER_GATEWAY_CREATE');
         }
         return res.status(409).json({
           error: 'Worker was fenced off. A newer attempt has taken ownership.'
         });
       }
 
-      try {
-        await updateDoc(orderDocRef, {
+      const reason = mappingErr?.message?.includes('MAPPING_CONFLICT')
+        ? 'ORDER_MAPPING_CONFLICT'
+        : 'ORDER_MAPPING_PERSISTENCE_FAILED';
+      if (razorpayOrderId) {
+        await recordOrphanMapping(razorpayOrderId, claimedOrderNumber, reason);
+      }
+      await failAttemptFenced({
+        allowedStatuses: ['RESERVED'],
+        release: false,
+        orderUpdates: {
           status: 'RECONCILIATION_REQUIRED',
-          reconciliationReason: 'ORDER_MAPPING_PERSISTENCE_FAILED',
-          updatedAt: new Date().toISOString()
-        });
-        await updateDoc(idempDocRef, {
-          status: 'RECONCILIATION_REQUIRED',
-          updatedAt: new Date().toISOString()
-        });
-      } catch (e) {}
+          reconciliationReason: reason,
+          razorpayOrderId: razorpayOrderId || null
+        },
+        idempUpdates: { status: 'RECONCILIATION_REQUIRED', reconciliationReason: reason }
+      });
       return res.status(500).json({
         error: 'Order mapping persistence failed. Order held for reconciliation.'
       });
@@ -1138,6 +1236,9 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
     let rzpPaymentId: string | undefined = undefined;
     let incomingAmountPaise: number | undefined = undefined;
     let incomingCurrency: string | undefined = undefined;
+    // Set when the event cannot be verified: it is then recorded for reconciliation and must not
+    // change any order or inventory state.
+    let reconciliationOnly: { reason: string; detail: string } | null = null;
 
     if (eventType === 'payment.captured') {
       if (!paymentEntity) {
@@ -1251,6 +1352,70 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
       if (paymentEntity.status && paymentEntity.status === 'captured') {
         return res.status(400).json({ error: 'Invalid payment status: captured payment received in payment.failed event.' });
       }
+
+      // Gap 1.2.2-a: amount/currency missing -> never trust the event as-is. Verify the payment
+      // against the authenticated Razorpay API, otherwise hold the event for reconciliation.
+      if (incomingAmountPaise === undefined || incomingCurrency === undefined) {
+        const keyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID;
+        const keySecret = process.env.RAZORPAY_KEY_SECRET;
+        if (!keyId || !keySecret) {
+          reconciliationOnly = {
+            reason: 'PAYMENT_FAILED_UNVERIFIED',
+            detail: 'payment.failed missing amount/currency and Razorpay API credentials are not configured.'
+          };
+        } else {
+          try {
+            const authHeader = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+            const payRes = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(rzpPaymentId)}`, {
+              headers: { Authorization: `Basic ${authHeader}` },
+              signal: AbortSignal.timeout(RAZORPAY_TIMEOUT_MS)
+            });
+            if (!payRes.ok) {
+              reconciliationOnly = {
+                reason: 'PAYMENT_FAILED_UNVERIFIED',
+                detail: `Razorpay API returned ${payRes.status} while verifying payment ${rzpPaymentId}.`
+              };
+            } else {
+              const pay = await payRes.json();
+              const apiAmountOk = typeof pay?.amount === 'number' && Number.isInteger(pay.amount) && pay.amount > 0;
+              const apiCurrencyOk = typeof pay?.currency === 'string' && pay.currency.trim() !== '';
+              if (pay?.id !== rzpPaymentId || pay?.order_id !== rzpOrderId) {
+                reconciliationOnly = {
+                  reason: 'PAYMENT_FAILED_API_MISMATCH',
+                  detail: `Razorpay API payment ${pay?.id} / order ${pay?.order_id} does not match webhook.`
+                };
+              } else if (pay.status !== 'failed') {
+                reconciliationOnly = {
+                  reason: 'PAYMENT_FAILED_API_STATUS',
+                  detail: `Razorpay API reports payment status "${pay.status}", not "failed".`
+                };
+              } else if (!apiAmountOk || !apiCurrencyOk) {
+                reconciliationOnly = {
+                  reason: 'PAYMENT_FAILED_UNVERIFIED',
+                  detail: 'Razorpay API response lacks a valid amount or currency.'
+                };
+              } else if (
+                (incomingAmountPaise !== undefined && incomingAmountPaise !== pay.amount) ||
+                (incomingCurrency !== undefined && incomingCurrency !== pay.currency)
+              ) {
+                reconciliationOnly = {
+                  reason: 'PAYMENT_FAILED_API_MISMATCH',
+                  detail: 'Webhook amount/currency disagrees with the Razorpay API.'
+                };
+              } else {
+                incomingAmountPaise = pay.amount;
+                incomingCurrency = pay.currency;
+              }
+            }
+          } catch (apiErr: any) {
+            console.error('Razorpay API payment verification exception:', apiErr);
+            reconciliationOnly = {
+              reason: 'PAYMENT_FAILED_UNVERIFIED',
+              detail: `Razorpay API unreachable while verifying payment: ${apiErr?.message || apiErr}`
+            };
+          }
+        }
+      }
     }
 
     // 1. Claim event ID durably with monotonic lease generation and UUID fence token (Fix B)
@@ -1339,6 +1504,37 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
           return { success: false };
         }
       };
+
+      // Unverifiable event: record it for reconciliation without touching order/inventory state.
+      // A later redelivery reclaims the event (new lease generation) and may verify it then.
+      if (reconciliationOnly) {
+        const updateRes = await fencedUpdateEvent({
+          status: 'RECONCILIATION_REQUIRED',
+          requiresReconciliation: true,
+          reconciliationReason: reconciliationOnly.reason,
+          error: reconciliationOnly.detail,
+          razorpayOrderId: rzpOrderId || null,
+          razorpayPaymentId: rzpPaymentId || null
+        });
+        if (updateRes.fencedOff) {
+          return res.status(409).json({ error: 'Worker was fenced off.' });
+        }
+        if (!updateRes.success) {
+          return res.status(500).json({ error: 'Durable storage unavailable to record webhook for reconciliation.' });
+        }
+        return res.status(202).json({
+          status: 'reconciliation_required',
+          eventId,
+          reason: reconciliationOnly.reason
+        });
+      }
+
+      // Defence in depth: a state-changing payment.failed must carry verified amount + currency.
+      if (eventType === 'payment.failed' && (incomingAmountPaise === undefined || incomingCurrency === undefined)) {
+        throw new Error('INVARIANT: payment.failed reached state transition without verified amount/currency.');
+      }
+
+      await runTestHook('webhook.afterClaim', { eventId, leaseGeneration: workerLeaseGeneration });
 
       // 2. Resolve matching internal order via receipt or durable orderMappings
       let orderDocRef: any = null;
@@ -1506,7 +1702,11 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
       // Enforces lease generation, order state, reservation state, and inventory mutations in ONE transaction
       const eventDocRef = doc(db, 'razorpayEvents', eventId);
 
-      const transitionResult = await runTransaction(db, async (transaction) => {
+      await runTestHook('webhook.beforeTransition', { eventId, leaseGeneration: workerLeaseGeneration });
+
+      let transitionResult: any;
+      try {
+      transitionResult = await runTransaction(db, async (transaction) => {
         // Authoritative Fencing Check inside transaction:
         const curEventSnap = await transaction.get(eventDocRef);
         if (!curEventSnap.exists()) {
@@ -1681,6 +1881,30 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
           return { outcome: 'cancelled' };
         }
       });
+      } catch (transitionErr: any) {
+        const msg: string = transitionErr?.message || '';
+        // Business-state conflicts are not retryable: record them for reconciliation (fenced)
+        // instead of leaving the event PROCESSING forever.
+        const businessError = /^(ORDER_TERMINAL_STATE|ORDER_NOT_FOUND|RESERVATION_MISSING|CANNOT_CONSUME_RELEASED_RESERVATION|CANNOT_RELEASE_CONSUMED_RESERVATION|MISSING_INVENTORY_DOC|INCONSISTENT_RESERVED_QUANTITY)/.exec(msg);
+        if (businessError) {
+          const updateRes = await fencedUpdateEvent({
+            status: 'FAILED',
+            requiresReconciliation: true,
+            reconciliationReason: businessError[1],
+            error: msg
+          });
+          if (updateRes.fencedOff) {
+            return res.status(409).json({ error: 'Worker was fenced off.' });
+          }
+          if (updateRes.success) {
+            return res.status(422).json({
+              error: 'Webhook conflicts with stored order/inventory state. Preserved for reconciliation.',
+              reason: businessError[1]
+            });
+          }
+        }
+        throw transitionErr;
+      }
 
       return res.status(200).json({
         status: 'success',
