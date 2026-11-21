@@ -2,7 +2,8 @@
  * Server-only inventory reservation logic (firebase-admin).
  * Moved from src/services/dbService.ts so the server no longer uses the unauthenticated client SDK.
  */
-import { getAdminDb, doc, runTransaction } from './firestoreAdmin';
+import type { Firestore } from 'firebase-admin/firestore';
+import { getAdminDb, doc, runTransaction, type TransactionLike } from './firestoreAdmin';
 import type { InventoryReservationRecord } from '../types';
 import { ACTIVE_CANONICAL_CATALOG_MAP } from '../data/canonicalCatalog';
 import type { InventoryRecord } from '../services/dbService';
@@ -249,107 +250,10 @@ export async function releaseInventoryReservation(
   try {
     const db = getAdminDb();
     return await runTransaction(db, async (transaction) => {
-      const resRef = doc(db, 'inventoryReservations', resId);
-      const resSnap = await transaction.get(resRef);
-
-      if (!resSnap.exists()) {
-        return {
-          success: false,
-          error: `Reservation "${resId}" does not exist in authoritative storage. Stock cannot be released.`
-        };
-      }
-
-      const resData = resSnap.data() as InventoryReservationRecord;
-
-      if (resData.status === 'RELEASED') {
-        // Idempotent return: already released, do not alter inventory again
-        return { success: true, alreadyReleased: true };
-      }
-
-      if (resData.status === 'CONSUMED') {
-        return {
-          success: false,
-          error: `Reservation "${resId}" is already CONSUMED and cannot be released.`
-        };
-      }
-
-      if (resData.status !== 'RESERVED') {
-        return {
-          success: false,
-          error: `Reservation "${resId}" is in invalid state "${resData.status}". Expected RESERVED.`
-        };
-      }
-
-      const itemsToRelease = resData.items;
-      if (!Array.isArray(itemsToRelease) || itemsToRelease.length === 0) {
-        return {
-          success: false,
-          error: `Reservation "${resId}" has missing or empty items array.`
-        };
-      }
-
-      // Read phase: Require all referenced inventory documents to exist and check reservedQuantity
-      const invUpdates: { ref: any; newAvail: number; newReserved: number; prodId: string }[] = [];
-
-      for (const item of itemsToRelease) {
-        if (!item.productId || typeof item.quantity !== 'number' || item.quantity <= 0) {
-          return {
-            success: false,
-            error: `Reservation "${resId}" contains invalid item specification for "${item.productId}".`
-          };
-        }
-
-        const invRef = doc(db, 'inventory', item.productId);
-        const invSnap = await transaction.get(invRef);
-
-        if (!invSnap.exists()) {
-          // Invariant: Never skip missing documents!
-          return {
-            success: false,
-            error: `Authoritative inventory document for product "${item.productId}" does not exist. Aborting release.`
-          };
-        }
-
-        const invData = invSnap.data() as InventoryRecord;
-        const currentAvail = invData.availableQuantity ?? invData.quantity ?? 0;
-        const currentReserved = invData.reservedQuantity ?? 0;
-
-        if (currentReserved < item.quantity) {
-          return {
-            success: false,
-            error: `Inconsistent inventory for product "${item.productId}": reservedQuantity (${currentReserved}) is less than release quantity (${item.quantity}). Aborting release.`
-          };
-        }
-
-        const newAvail = currentAvail + item.quantity;
-        const newReserved = currentReserved - item.quantity;
-
-        invUpdates.push({
-          ref: invRef,
-          newAvail,
-          newReserved,
-          prodId: item.productId
-        });
-      }
-
-      // Write phase: update all inventory documents atomically
-      for (const update of invUpdates) {
-        transaction.update(update.ref, {
-          availableQuantity: update.newAvail,
-          reservedQuantity: update.newReserved,
-          inStock: update.newAvail > 0,
-          status: update.newAvail > 0 ? 'in_stock' : 'out_of_stock',
-          updatedAt: new Date().toISOString()
-        });
-      }
-
-      // Mark reservation durably as RELEASED in the same transaction
-      transaction.update(resRef, {
-        status: 'RELEASED',
-        releasedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-
+      const plan = await planReservationRelease(transaction, db, resId);
+      if (plan.kind === 'already_released') return { success: true, alreadyReleased: true };
+      if (plan.kind !== 'release') return { success: false, error: plan.error };
+      plan.apply();
       return { success: true };
     });
   } catch (err: any) {
@@ -359,6 +263,98 @@ export async function releaseInventoryReservation(
       error: err?.message || 'Transaction failed while releasing reservation.'
     };
   }
+}
+
+export type ReleasePlan =
+  | { kind: 'release'; apply: () => void }
+  | { kind: 'already_released' }
+  | { kind: 'missing'; error: string }
+  | { kind: 'blocked'; error: string };
+
+/**
+ * Reads (but does not write) everything needed to release a reservation inside an existing
+ * transaction. Firestore transactions require all reads before writes, so callers combine this
+ * with their own fence checks and then call `plan.apply()` only if they still own the attempt.
+ *
+ * Invariants: never restores stock for a missing reservation or missing inventory doc, never
+ * releases a CONSUMED reservation, never drives reservedQuantity negative.
+ */
+export async function planReservationRelease(
+  transaction: TransactionLike,
+  db: Firestore,
+  resId: string
+): Promise<ReleasePlan> {
+  const resRef = doc(db, 'inventoryReservations', resId);
+  const resSnap = await transaction.get(resRef);
+
+  if (!resSnap.exists()) {
+    return {
+      kind: 'missing',
+      error: `Reservation "${resId}" does not exist in authoritative storage. Stock cannot be released.`
+    };
+  }
+
+  const resData = resSnap.data() as InventoryReservationRecord;
+  if (resData.status === 'RELEASED') return { kind: 'already_released' };
+  if (resData.status === 'CONSUMED') {
+    return { kind: 'blocked', error: `Reservation "${resId}" is already CONSUMED and cannot be released.` };
+  }
+  if (resData.status !== 'RESERVED') {
+    return {
+      kind: 'blocked',
+      error: `Reservation "${resId}" is in invalid state "${resData.status}". Expected RESERVED.`
+    };
+  }
+
+  const itemsToRelease = resData.items;
+  if (!Array.isArray(itemsToRelease) || itemsToRelease.length === 0) {
+    return { kind: 'blocked', error: `Reservation "${resId}" has missing or empty items array.` };
+  }
+
+  const invUpdates: { ref: any; newAvail: number; newReserved: number }[] = [];
+  for (const item of itemsToRelease) {
+    if (!item.productId || typeof item.quantity !== 'number' || item.quantity <= 0) {
+      return {
+        kind: 'blocked',
+        error: `Reservation "${resId}" contains invalid item specification for "${item.productId}".`
+      };
+    }
+    const invRef = doc(db, 'inventory', item.productId);
+    const invSnap = await transaction.get(invRef);
+    if (!invSnap.exists()) {
+      return {
+        kind: 'blocked',
+        error: `Authoritative inventory document for product "${item.productId}" does not exist. Aborting release.`
+      };
+    }
+    const invData = invSnap.data() as InventoryRecord;
+    const currentAvail = invData.availableQuantity ?? invData.quantity ?? 0;
+    const currentReserved = invData.reservedQuantity ?? 0;
+    if (currentReserved < item.quantity) {
+      return {
+        kind: 'blocked',
+        error: `Inconsistent inventory for product "${item.productId}": reservedQuantity (${currentReserved}) is less than release quantity (${item.quantity}). Aborting release.`
+      };
+    }
+    invUpdates.push({ ref: invRef, newAvail: currentAvail + item.quantity, newReserved: currentReserved - item.quantity });
+  }
+
+  return {
+    kind: 'release',
+    apply: () => {
+      const now = new Date().toISOString();
+      for (const u of invUpdates) {
+        transaction.update(u.ref, {
+          availableQuantity: u.newAvail,
+          reservedQuantity: u.newReserved,
+          inStock: u.newAvail > 0,
+          status: u.newAvail > 0 ? 'in_stock' : 'out_of_stock',
+          updatedAt: now
+        });
+      }
+      transaction.update(resRef, { status: 'RELEASED', releasedAt: now, updatedAt: now });
+    }
+  };
 }
 
 /**
