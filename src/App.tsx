@@ -22,6 +22,8 @@ import { CartPage } from './storefront/pages/CartPage';
 import { BuildBoxPage } from './storefront/pages/BuildBoxPage';
 import { CheckoutPage } from './storefront/pages/CheckoutPage';
 import { ConfirmedPage } from './storefront/pages/ConfirmedPage';
+import { SignInPage } from './storefront/pages/SignInPage';
+import { AccountPage } from './storefront/pages/AccountPage';
 
 /** Route table mirrors src/lib/routes.ts (also used by the server for titles and 404s). */
 export function StorefrontRoutes() {
@@ -45,6 +47,8 @@ export function StorefrontRoutes() {
         <Route path="build-a-box" element={<BuildBoxPage />} />
         <Route path="checkout" element={<CheckoutPage />} />
         <Route path="order/:id/confirmed" element={<ConfirmedPage />} />
+        <Route path="sign-in" element={<SignInPage />} />
+        <Route path="account" element={<AccountPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

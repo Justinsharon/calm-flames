@@ -8,6 +8,8 @@ import { INDIAN_STATES, type CheckoutCustomer, type CustomerErrors, validateCust
 import { useDocumentMeta } from '../hooks/useMotion';
 import { payWithRazorpay, type RazorpayMethod } from '../lib/razorpay';
 import { Button, ButtonLink } from '../components/ui';
+import { useAuth } from '../../context/AuthContext';
+import { getAddresses, saveAddress } from '../../services/accountService';
 
 type Pay = RazorpayMethod | 'cod';
 const PAY_OPTIONS: { id: Pay; label: string; sub: string }[] = [
@@ -94,6 +96,33 @@ export const CheckoutPage: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const attempt = useRef<{ fp: string; key: string } | null>(null);
+  const { user, profile, getIdToken } = useAuth();
+  const [hasSaved, setHasSaved] = useState<boolean | null>(null);
+  const [saveForLater, setSaveForLater] = useState(false);
+
+  // Signed in: prefill contact details and the default saved address (never overwrite typing).
+  useEffect(() => {
+    if (!user) return;
+    let live = true;
+    getAddresses(user.uid)
+      .then((list) => {
+        if (!live) return;
+        setHasSaved(list.length > 0);
+        setSaveForLater(list.length === 0);
+        const a = list.find((x) => x.isDefault) || list[0];
+        setForm((f) => {
+          const blank = Object.values(f).every((v) => !v);
+          if (!blank) return f;
+          return a
+            ? { fullName: a.fullName, email: profile?.email || '', phone: a.phone, addressLine1: a.addressLine1, addressLine2: a.addressLine2 || '', city: a.city, state: a.state, pincode: a.pincode }
+            : { ...f, email: profile?.email || '', fullName: profile?.fullName || '' };
+        });
+      })
+      .catch(() => live && setHasSaved(false));
+    return () => {
+      live = false;
+    };
+  }, [user, profile?.email, profile?.fullName]);
 
   useEffect(() => {
     let live = true;
@@ -172,13 +201,21 @@ export const CheckoutPage: React.FC = () => {
     try {
       const res = await fetch('/api/orders/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': attempt.current.key },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': attempt.current.key,
+          // Signed in: the order is linked to the account (Orders tab, verified-buyer reviews).
+          ...(user ? { Authorization: `Bearer ${await getIdToken()}` } : {})
+        },
         body: JSON.stringify(body)
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (res.status !== 409) attempt.current = null;
         throw new Error(d.error || 'We could not place your order. Please try again.');
+      }
+      if (user && saveForLater) {
+        saveAddress(user.uid, { ...form, isDefault: !hasSaved }).catch(() => {});
       }
       if (d.viewToken) {
         try {
@@ -267,6 +304,15 @@ export const CheckoutPage: React.FC = () => {
               </select>
               {show('state') && <p className="field-err" id="co-state-err">{show('state')}</p>}
             </label>
+            {user ? (
+              <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14 }}>
+                <input type="checkbox" checked={saveForLater} onChange={(e) => setSaveForLater(e.target.checked)} /> Save this address to my account
+              </label>
+            ) : (
+              <p style={{ margin: 0, fontSize: 14, color: 'var(--color-muted)' }}>
+                Checking out as a guest. <Link to={paths.signIn('/checkout')} className="lnk">Sign in</Link> to use saved addresses.
+              </p>
+            )}
           </fieldset>
 
           <fieldset className="glass" style={{ padding: 'clamp(20px, 3vw, 32px)', margin: 0 }}>

@@ -1,32 +1,18 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import {
-  User,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signInWithPopup,
-  sendPasswordResetEmail,
-  signOut as firebaseSignOut
-} from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../lib/firebase';
-import { CustomerDetails } from '../types';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { type User, onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db, googleProvider } from '../lib/firebase';
 
-export interface CustomerPreferences {
-  preferredMoods: string[];
-  preferredScents: string[];
-  preferredIntensity: string;
-  preferredOccasions: string[];
-}
-
+/**
+ * Google sign-in only (Firebase Auth). Guests browse and buy without an account.
+ * The admin role is read ONLY from customers/{uid}.role (set by `npm run grant-admin`);
+ * firestore.rules stop users from granting it to themselves.
+ */
 export interface CustomerProfile {
   uid: string;
   email: string;
   fullName: string;
-  phone?: string;
   role: 'customer' | 'admin';
-  savedAddress?: CustomerDetails;
-  preferences?: CustomerPreferences;
   createdAt: string;
 }
 
@@ -35,221 +21,72 @@ interface AuthContextType {
   profile: CustomerProfile | null;
   isAdmin: boolean;
   loading: boolean;
+  /** The sign-in modal (the /sign-in page shows the same panel). */
   isAuthModalOpen: boolean;
   setIsAuthModalOpen: (open: boolean) => void;
-  isAccountOpen: boolean;
-  setIsAccountOpen: (open: boolean) => void;
-  signInWithEmail: (email: string, pass: string) => Promise<void>;
-  signUpWithEmail: (email: string, pass: string, fullName: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
-  updatePreferences: (prefs: Partial<CustomerPreferences>) => Promise<void>;
-  saveAddress: (address: CustomerDetails) => Promise<void>;
+  /** Fresh Firebase ID token for server calls (links an order to the account). */
+  getIdToken: () => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-// The admin role is read ONLY from the Firestore customers/{uid} document (`role: 'admin'`),
-// set with `npm run grant-admin -- <email>`. Users can never grant it to themselves
-// (enforced by firestore.rules).
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [isAccountOpen, setIsAccountOpen] = useState(false);
 
-  // Sync user profile from Firestore or bootstrap customer doc
-  const loadCustomerProfile = async (firebaseUser: User) => {
-    const userDocRef = doc(db, 'customers', firebaseUser.uid);
-
-    try {
-      const snap = await getDoc(userDocRef);
-      if (snap.exists()) {
-        const data = snap.data();
-        setProfile({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email || data.email,
-          fullName: data.firstName || data.fullName || firebaseUser.displayName || 'Calm Seeker',
-          phone: data.phone || '',
-          role: data.role === 'admin' ? 'admin' : 'customer',
-          savedAddress: data.addresses?.[0] || data.savedAddress,
-          preferences: data.preferences,
-          createdAt: data.createdAt || new Date().toISOString()
-        });
-      } else {
-        // Initial customer profile creation
-        const newProfile: CustomerProfile = {
-          uid: firebaseUser.uid,
-          email: firebaseUser.email || '',
-          fullName: firebaseUser.displayName || 'Calm Seeker',
-          phone: '',
-          role: 'customer',
-          createdAt: new Date().toISOString(),
-          preferences: {
-            preferredMoods: ['calm', 'wind-down'],
-            preferredScents: ['Herbal', 'Woody'],
-            preferredIntensity: 'Balanced',
-            preferredOccasions: ['Evening unwind']
+  useEffect(
+    () =>
+      onAuthStateChanged(auth, async (u) => {
+        setUser(u);
+        if (!u) {
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+        const base: CustomerProfile = { uid: u.uid, email: u.email || '', fullName: u.displayName || '', role: 'customer', createdAt: new Date().toISOString() };
+        try {
+          const ref = doc(db, 'customers', u.uid);
+          const snap = await getDoc(ref);
+          if (snap.exists()) {
+            const d = snap.data();
+            setProfile({ ...base, fullName: u.displayName || d.firstName || d.fullName || '', role: d.role === 'admin' ? 'admin' : 'customer', createdAt: d.createdAt || base.createdAt });
+          } else {
+            // Only the name and email from Google are kept.
+            await setDoc(ref, { id: u.uid, email: base.email, firstName: base.fullName, role: 'customer', createdAt: base.createdAt });
+            setProfile(base);
           }
-        };
-
-        await setDoc(userDocRef, {
-          id: firebaseUser.uid,
-          email: newProfile.email,
-          firstName: newProfile.fullName,
-          role: newProfile.role,
-          createdAt: newProfile.createdAt,
-          preferences: newProfile.preferences
-        });
-
-        setProfile(newProfile);
-      }
-    } catch (err) {
-      console.warn('Could not read user profile from Firestore:', err);
-      // Fallback in-memory profile
-      setProfile({
-        uid: firebaseUser.uid,
-        email: firebaseUser.email || '',
-        fullName: firebaseUser.displayName || 'Calm Seeker',
-        role: 'customer',
-        createdAt: new Date().toISOString()
-      });
-    }
-  };
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        await loadCustomerProfile(currentUser);
-      } else {
-        setProfile(null);
-      }
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  const signInWithEmail = async (email: string, pass: string) => {
-    await signInWithEmailAndPassword(auth, email, pass);
-    setIsAuthModalOpen(false);
-  };
-
-  const signUpWithEmail = async (email: string, pass: string, fullName: string) => {
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    const userDocRef = doc(db, 'customers', cred.user.uid);
-
-    const initialData = {
-      id: cred.user.uid,
-      email,
-      firstName: fullName,
-      role: 'customer',
-      createdAt: new Date().toISOString()
-    };
-
-    try {
-      await setDoc(userDocRef, initialData);
-    } catch (e) {
-      console.warn('Customer document write warning:', e);
-    }
-
-    setProfile({
-      uid: cred.user.uid,
-      email,
-      fullName,
-      role: 'customer',
-      createdAt: initialData.createdAt
-    });
-
-    setIsAuthModalOpen(false);
-  };
+        } catch (e) {
+          console.warn('Could not read the customer profile:', e);
+          setProfile(base);
+        }
+        setLoading(false);
+      }),
+    []
+  );
 
   const signInWithGoogle = async () => {
     await signInWithPopup(auth, googleProvider);
     setIsAuthModalOpen(false);
   };
-
-  const resetPassword = async (email: string) => {
-    await sendPasswordResetEmail(auth, email);
-  };
-
   const signOut = async () => {
     await firebaseSignOut(auth);
     setProfile(null);
-    setIsAccountOpen(false);
   };
-
-  const updatePreferences = async (newPrefs: Partial<CustomerPreferences>) => {
-    if (!user || !profile) return;
-    const updated = {
-      ...(profile.preferences || {
-        preferredMoods: [],
-        preferredScents: [],
-        preferredIntensity: 'Balanced',
-        preferredOccasions: []
-      }),
-      ...newPrefs
-    };
-
-    try {
-      const userRef = doc(db, 'customers', user.uid);
-      await updateDoc(userRef, { preferences: updated });
-      setProfile((prev) => (prev ? { ...prev, preferences: updated } : null));
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `customers/${user.uid}`);
-    }
-  };
-
-  const saveAddress = async (address: CustomerDetails) => {
-    if (!user) return;
-    try {
-      const userRef = doc(db, 'customers', user.uid);
-      await updateDoc(userRef, {
-        savedAddress: address,
-        phone: address.phone,
-        addresses: [address]
-      });
-      setProfile((prev) => (prev ? { ...prev, savedAddress: address, phone: address.phone } : null));
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `customers/${user.uid}`);
-    }
-  };
-
-  const isAdmin = profile?.role === 'admin';
+  const getIdToken = async () => (auth.currentUser ? auth.currentUser.getIdToken() : null);
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        profile,
-        isAdmin,
-        loading,
-        isAuthModalOpen,
-        setIsAuthModalOpen,
-        isAccountOpen,
-        setIsAccountOpen,
-        signInWithEmail,
-        signUpWithEmail,
-        signInWithGoogle,
-        resetPassword,
-        signOut,
-        updatePreferences,
-        saveAddress
-      }}
-    >
+    <AuthContext.Provider value={{ user, profile, isAdmin: profile?.role === 'admin', loading, isAuthModalOpen, setIsAuthModalOpen, signInWithGoogle, signOut, getIdToken }}>
       {children}
     </AuthContext.Provider>
   );
 };
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+  const c = useContext(AuthContext);
+  if (!c) throw new Error('useAuth must be used within an AuthProvider');
+  return c;
 };

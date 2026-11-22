@@ -31,7 +31,9 @@ export type RouteName =
   | 'cart'
   | 'buildBox'
   | 'checkout'
-  | 'orderConfirmed';
+  | 'orderConfirmed'
+  | 'signIn'
+  | 'account';
 
 /** Order matters only for readability: patterns do not overlap. */
 export const ROUTES: { name: RouteName; path: string }[] = [
@@ -49,7 +51,9 @@ export const ROUTES: { name: RouteName; path: string }[] = [
   { name: 'cart', path: '/cart' },
   { name: 'buildBox', path: '/build-a-box' },
   { name: 'checkout', path: '/checkout' },
-  { name: 'orderConfirmed', path: '/order/:id/confirmed' }
+  { name: 'orderConfirmed', path: '/order/:id/confirmed' },
+  { name: 'signIn', path: '/sign-in' },
+  { name: 'account', path: '/account' }
 ];
 
 export interface RouteMatch {
@@ -97,6 +101,8 @@ export const paths = {
   cart: () => '/cart',
   buildBox: () => '/build-a-box',
   checkout: () => '/checkout',
+  signIn: (next?: string) => (next ? `/sign-in?next=${encodeURIComponent(next)}` : '/sign-in'),
+  account: (tab?: 'favourites' | 'orders' | 'addresses') => (tab ? `/account?tab=${tab}` : '/account'),
   /** The view token goes in the #fragment: never sent to the server in the URL or logged. */
   orderConfirmed: (orderNumber: string, token?: string) =>
     `/order/${encodeURIComponent(orderNumber)}/confirmed${token ? `#t=${encodeURIComponent(token)}` : ''}`

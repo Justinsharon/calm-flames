@@ -99,6 +99,10 @@ export async function resolveMeta(pathname: string): Promise<PageMeta> {
         return base('Your cart');
       case 'checkout':
         return base('Checkout');
+      case 'signIn':
+        return base('Sign in', 'Sign in with Google to keep your favourites and orders in one place.');
+      case 'account':
+        return base('Your account');
       case 'orderConfirmed':
         // Never reveal anything about the order in the HTML (the page loads it with its token).
         return base('Order confirmed');
