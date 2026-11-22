@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { GiftGuide } from '../components/GiftGuide';
 import { useParams } from 'react-router';
 import { useCatalog } from '../../context/CatalogContext';
 import { useTaxonomy } from '../../context/TaxonomyContext';
@@ -8,33 +9,12 @@ import { useDocumentMeta } from '../hooks/useMotion';
 import { PageHero, HeroTitle } from '../components/PageHero';
 import { ProductGrid } from '../components/ProductCard';
 import { OccasionTile } from '../components/Tiles';
-import { EmptyNote, MatchAvatar, SectionHead } from '../components/ui';
+import { Button, EmptyNote, MatchAvatar, SectionHead } from '../components/ui';
 import { NotFoundPage } from './NotFoundPage';
-
-/** Gift guide: placeholder until Phase 4D (no fake chat replies). */
-const GiftGuide: React.FC = () => {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="guide">
-      {open && (
-        <div className="glass" role="dialog" aria-label="Gift guide" style={{ width: 340, maxWidth: 'calc(100vw - 40px)', background: 'rgba(30,11,15,.94)', boxShadow: '0 40px 90px rgba(0,0,0,.6)', padding: 18, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-          <MatchAvatar />
-          <div style={{ flex: 1 }}>
-            <strong style={{ display: 'block' }}>Gift guide</strong>
-            <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--color-muted)' }}>Our gift guide is coming soon. Meanwhile, browse by occasion or our ready hampers.</p>
-          </div>
-          <button type="button" aria-label="Close" onClick={() => setOpen(false)} style={{ width: 36, height: 36, borderRadius: 18, border: 0, background: 'rgba(244,237,231,.08)', color: 'var(--color-ivory)', cursor: 'pointer', fontSize: 18 }}>×</button>
-        </div>
-      )}
-      <button type="button" className="guide-btn" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <MatchAvatar size={46} />Gift guide
-      </button>
-    </div>
-  );
-};
 
 export const GiftingPage: React.FC = () => {
   const { occasion } = useParams();
+  const [guideOpen, setGuideOpen] = useState(false);
   const { products, loading } = useCatalog();
   const { occasions, scentFamilies } = useTaxonomy();
   const selected = occasion ? occasions.find((o) => o.slug === occasion) : undefined;
@@ -66,8 +46,9 @@ export const GiftingPage: React.FC = () => {
         <div className="glass" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 18, padding: '14px 18px', borderRadius: 32, background: 'rgba(92,22,34,.35)' }}>
           <MatchAvatar />
           <span style={{ flex: '1 1 240px' }}>
-            <strong>Not sure what to gift?</strong> <span style={{ color: 'var(--color-muted)' }}>Our gift guide is on its way.</span>
+            <strong>Not sure what to gift?</strong> <span style={{ color: 'var(--color-muted)' }}>Tell our gift guide who it's for.</span>
           </span>
+          <Button variant="out" onClick={() => setGuideOpen(true)}>Ask the gift guide</Button>
         </div>
       </section>
 
@@ -102,7 +83,7 @@ export const GiftingPage: React.FC = () => {
           )}
         </>
       )}
-      <GiftGuide />
+      <GiftGuide open={guideOpen} setOpen={setGuideOpen} />
     </>
   );
 };

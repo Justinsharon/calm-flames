@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { paths } from '../../lib/routes';
 import { splitFaq, SPECIAL_PAGE_SLUGS } from '../../lib/pages';
 import { Markdown } from '../../lib/markdown';
+import { TrackOrder, SupportForm } from '../components/SupportForms';
 import { useDocumentMeta } from '../hooks/useMotion';
 import { usePage } from '../hooks/usePages';
 import { PageHero, HeroTitle } from '../components/PageHero';
@@ -10,8 +11,8 @@ import { Accordion, Button, RingIcon, SectionHead } from '../components/ui';
 
 /**
  * Help & Support layout. FAQ and contact details come from the owner's published `pages/faq` and
- * `pages/contact`; the search filters the FAQ. Order tracking and the call-back form are laid out
- * but not connected yet (Phase 4D), and say so.
+ * `pages/contact`; the search filters the FAQ. Order tracking (number + phone) and the call-back /
+ * damaged-item form (optional photo) go to /api/orders/lookup and /api/support.
  */
 export const SupportPage: React.FC = () => {
   useDocumentMeta('Help & Support', 'Track an order, find answers, or talk to our studio.');
@@ -60,18 +61,7 @@ export const SupportPage: React.FC = () => {
       </section>
 
       <section id="track" className="wrap" style={{ paddingTop: 90, paddingBottom: 90 }}>
-        <div className="glass" style={{ display: 'flex', flexWrap: 'wrap', gap: 48, padding: 'clamp(28px, 4vw, 52px)', background: 'linear-gradient(135deg, rgba(123,30,46,.5), rgba(92,22,34,.2))' }}>
-          <form onSubmit={(e) => e.preventDefault()} style={{ flex: '1 1 320px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <p className="eyebrow" style={{ margin: 0 }}>Order status</p>
-            <h2 className="serif" style={{ margin: 0, fontWeight: 400, fontSize: 48, lineHeight: 1.05 }}>Track your <span className="script" style={{ color: 'var(--color-rose)', fontSize: '1.2em' }}>order</span></h2>
-            <label className="lab">Order number<input className="in" name="order" autoComplete="off" placeholder="TCF-" /></label>
-            <label className="lab">Phone number<input className="in" type="tel" name="phone" autoComplete="tel" placeholder="+91" /></label>
-            <div><Button type="submit" disabled aria-describedby="track-note">Track order</Button></div>
-          </form>
-          <div id="track-note" style={{ flex: '1 1 320px', minWidth: 0, minHeight: 220, border: '1px dashed rgba(244,237,231,.22)', borderRadius: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 24, color: 'var(--color-taupe)' }}>
-            Online order tracking opens soon.
-          </div>
-        </div>
+        <TrackOrder />
       </section>
 
       {faq.length > 0 && (
@@ -98,29 +88,7 @@ export const SupportPage: React.FC = () => {
             <Markdown source={contact.body} />
           </div>
         )}
-        <form onSubmit={(e) => e.preventDefault()} className="glass" style={{ padding: 'clamp(28px, 4vw, 48px)', maxWidth: 920, margin: '0 auto' }}>
-          <h3 className="serif" style={{ margin: '0 0 22px', fontWeight: 400, fontSize: 34 }}>Request a <span className="script" style={{ color: 'var(--color-rose)' }}>call back</span></h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-            <label className="lab">Name<input className="in" name="name" autoComplete="name" /></label>
-            <label className="lab">Phone<input className="in" type="tel" name="phone" autoComplete="tel" placeholder="+91" /></label>
-            <label className="lab">Order number (optional)<input className="in" name="order" placeholder="TCF-" /></label>
-            <label className="lab">Topic
-              <select className="in" name="topic" defaultValue="order">
-                <option value="order">Order &amp; delivery</option>
-                <option value="damaged">Damaged item</option>
-                <option value="returns">Returns &amp; refunds</option>
-                <option value="corporate">Corporate gifting</option>
-                <option value="other">Something else</option>
-              </select>
-            </label>
-            <label className="lab" style={{ gridColumn: '1 / -1' }}>How can we help?<textarea className="in" rows={4} name="message" /></label>
-            <label className="lab" style={{ gridColumn: '1 / -1' }}>Photo (for damaged items)<input className="in" type="file" accept="image/*" style={{ paddingTop: 12 }} /></label>
-          </div>
-          <div style={{ marginTop: 22, display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center' }}>
-            <Button type="submit" disabled aria-describedby="callback-note">Send request</Button>
-            <span id="callback-note" style={{ fontSize: 13, color: 'var(--color-taupe)' }}>Call-back requests open soon.</span>
-          </div>
-        </form>
+        <SupportForm />
       </section>
     </>
   );
