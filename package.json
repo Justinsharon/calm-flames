@@ -21,7 +21,6 @@
     "migrate:coupons": "tsx scripts/migrate-coupons.ts"
   },
   "dependencies": {
-    "@google/genai": "^2.27.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase-admin": "^13.10.0"

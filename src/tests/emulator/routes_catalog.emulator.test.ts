@@ -178,68 +178,6 @@ describe('Catalogue-dependent routes (Firestore emulator, seeded catalogue)', ()
       expect(res.body.error).toBeDefined();
     });
 
-    it('/api/ai/ritual must reject unknown product ID with 404', async () => {
-      const res = await request(app)
-        .post('/api/ai/ritual')
-        .send({ productId: 'unverified-scent-999' });
-      expect(res.status).toBe(404);
-      expect(res.body.error).toMatch(/not available in the active catalogue/i);
-    });
-
-    it('/api/ai/ritual must reject historical product ID with 404', async () => {
-      const res = await request(app)
-        .post('/api/ai/ritual')
-        .send({ productId: 'jasmine-sage' });
-      expect(res.status).toBe(404);
-      expect(res.body.error).toMatch(/not available in the active catalogue/i);
-    });
-
-    it('/api/ai/ritual must return valid ritual for verified active product', async () => {
-      const res = await request(app)
-        .post('/api/ai/ritual')
-        .send({ productId: 'jumbo-tealight-mogra', duration: '15 minutes' });
-      expect(res.status).toBe(200);
-      expect(res.body.title).toBeDefined();
-      expect(Array.isArray(res.body.steps)).toBe(true);
-      expect(res.body.mantra).toBeDefined();
-    });
-
-    it('/api/ai/compare must reject unknown product ID with 404', async () => {
-      const res = await request(app)
-        .post('/api/ai/compare')
-        .send({ productIds: ['jumbo-tealight-mogra', 'unknown-candle-404'] });
-      expect(res.status).toBe(404);
-      expect(res.body.error).toMatch(/either unavailable or not found/i);
-    });
-
-    it('/api/ai/compare must return comparison for verified active products', async () => {
-      const res = await request(app)
-        .post('/api/ai/compare')
-        .send({ productIds: ['jumbo-tealight-mogra', 'royal-urli'] });
-      expect(res.status).toBe(200);
-      expect(res.body.products).toHaveLength(2);
-      expect(res.body.guidance).toBeDefined();
-    });
-
-    it('/api/ai/find-flame must recommend a canonical active product', async () => {
-      const res = await request(app)
-        .post('/api/ai/find-flame')
-        .send({ feeling: 'Calm', moment: 'Evening unwind', scentPreference: 'Floral' });
-      expect(res.status).toBe(200);
-      expect(await isActiveInFirestore(res.body.productId)).toBe(true);
-    });
-
-    it('/api/ai/assistant must return safe response and suggest active products only', async () => {
-      const res = await request(app)
-        .post('/api/ai/assistant')
-        .send({ message: 'What candle is good for meditation?' });
-      expect(res.status).toBe(200);
-      expect(res.body.reply).toBeDefined();
-      for (const id of res.body.suggestedProducts) {
-        expect(await isActiveInFirestore(id)).toBe(true);
-      }
-    });
-
     it('must reject reservation if any item in duplicate list is historical or invalid', async () => {
       const itemsWithHistorical = [
         { productId: 'jumbo-tealight-mogra', quantity: 1 },
@@ -336,12 +274,12 @@ describe('Catalogue-dependent routes (Firestore emulator, seeded catalogue)', ()
     expect(res.body.error).toMatch(/does not have a verified retail price/i);
   });
 
-  it('deactivating a product makes it unbuyable and hides it from AI endpoints', async () => {
+  it('deactivating a product makes it unbuyable and keeps it out of the gift guide', async () => {
     await getAdminDb().collection('products').doc('royal-urli').update({ isActive: false });
     const cart = await request(app).post('/api/cart/validate').send({ items: [{ productId: 'royal-urli', quantity: 1 }] });
     expect(cart.status).toBe(400);
-    const ritual = await request(app).post('/api/ai/ritual').send({ productId: 'royal-urli' });
-    expect(ritual.status).toBe(404);
+    const guide = await request(app).post('/api/gift-guide').send({ message: 'urli centrepiece' });
+    expect(JSON.stringify(guide.body)).not.toContain('royal-urli');
   });
 
   it('readiness reads the live catalogue and stays disabled while products are unpriced', async () => {

@@ -36,7 +36,7 @@ import {
   updateOrderTracking,
   InventoryRecord
 } from '../../services/dbService';
-import { reviewsService, ProductReview } from '../../services/reviewsService';
+import { getAllReviews, setReviewStatus, deleteReview, type ProductReview, type ReviewStatus } from '../../services/reviewsService';
 import {
   subscribeAllProducts,
   updateProductCommercials,
@@ -66,7 +66,6 @@ export interface FeatureFlags {
   enableAIRituals: boolean;
   enableShoppingAssistant: boolean;
   enableGiftFinder: boolean;
-  enableRewards: boolean;
   enableReferrals: boolean;
   enableReviews: boolean;
 }
@@ -76,7 +75,6 @@ const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   enableAIRituals: true,
   enableShoppingAssistant: true,
   enableGiftFinder: true,
-  enableRewards: true,
   enableReferrals: true,
   enableReviews: true
 };
@@ -125,7 +123,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
       const [ords, inv, revs] = await Promise.all([
         fetchOrders(),
         fetchInventory(),
-        reviewsService.getAllReviews()
+        getAllReviews().catch(() => [] as ProductReview[])
       ]);
       setOrders(ords);
       setInventory(inv);
@@ -178,18 +176,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
     setTimeout(() => setFeedback(null), 2500);
   };
 
-  const handleToggleReviewStatus = async (reviewId: string, currentStatus: boolean) => {
-    await reviewsService.toggleReviewModeration(reviewId, !currentStatus);
-    setReviews((prev) =>
-      prev.map((r) => (r.id === reviewId ? { ...r, isPublished: !currentStatus } : r))
-    );
-    setFeedback(`Review status updated.`);
-    setTimeout(() => setFeedback(null), 2500);
+  const handleSetReviewStatus = async (id: string, status: ReviewStatus) => {
+    await setReviewStatus(id, status);
+    setReviews((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+    setFeedback(`Review ${status}.`);
+    setTimeout(() => setFeedback(null), 3000);
   };
 
   const handleDeleteReview = async (reviewId: string) => {
     if (confirm('Delete this review permanently?')) {
-      await reviewsService.deleteReview(reviewId);
+      await deleteReview(reviewId);
       setReviews((prev) => prev.filter((r) => r.id !== reviewId));
       setFeedback('Review removed.');
       setTimeout(() => setFeedback(null), 2500);
@@ -1079,12 +1075,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                             {rev.productId.replace(/-/g, ' ')}
                           </td>
                           <td className="py-3 px-4 text-[#4A2F22]">
-                            <p className="font-semibold">{rev.customerName}</p>
-                            {rev.isVerified && (
-                              <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                                Verified Purchase
-                              </span>
-                            )}
+                            <p className="font-semibold">{rev.authorName}</p>
+                            <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">Verified buyer</span>
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1 text-amber-500 font-bold font-sans">
@@ -1098,24 +1090,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                           </td>
                           <td className="py-3 px-4">
                             <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                                rev.isPublished !== false
-                                  ? 'bg-emerald-50 text-emerald-700'
-                                  : 'bg-stone-200 text-stone-600'
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold capitalize ${
+                                rev.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : rev.status === 'pending' ? 'bg-amber-50 text-amber-800' : 'bg-stone-200 text-stone-600'
                               }`}
                             >
-                              {rev.isPublished !== false ? 'Published' : 'Hidden'}
+                              {rev.status}
                             </span>
                           </td>
                           <td className="py-3 px-4 text-right space-x-2">
+                            {rev.status !== 'approved' && (
+                              <button
+                                onClick={() => handleSetReviewStatus(rev.id, 'approved')}
+                                className="px-2.5 py-1 rounded bg-[#F2ECE1] hover:bg-[#E5DCCE] text-[#4A2F22] text-[11px] font-semibold transition-colors"
+                              >
+                                Approve
+                              </button>
+                            )}
+                            {rev.status !== 'rejected' && (
+                              <button
+                                onClick={() => handleSetReviewStatus(rev.id, 'rejected')}
+                                className="px-2.5 py-1 rounded bg-[#F2ECE1] hover:bg-[#E5DCCE] text-[#4A2F22] text-[11px] font-semibold transition-colors"
+                              >
+                                {rev.status === 'approved' ? 'Hide' : 'Reject'}
+                              </button>
+                            )}
                             <button
-                              onClick={() => handleToggleReviewStatus(rev.id || '', rev.isPublished !== false)}
-                              className="px-2.5 py-1 rounded bg-[#F2ECE1] hover:bg-[#E5DCCE] text-[#4A2F22] text-[11px] font-semibold transition-colors"
-                            >
-                              {rev.isPublished !== false ? 'Hide' : 'Approve'}
-                            </button>
-                            <button
-                              onClick={() => handleDeleteReview(rev.id || '')}
+                              onClick={() => handleDeleteReview(rev.id)}
                               className="p-1 text-stone-400 hover:text-rose-600 transition-colors"
                               title="Delete Review"
                             >
@@ -1215,25 +1215,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                       <div
                         className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
                           featureFlags.enableGiftFinder ? 'translate-x-6' : 'translate-x-0'
-                        }`}
-                      />
-                    </button>
-                  </div>
-
-                  <div className="py-4 flex items-center justify-between">
-                    <div>
-                      <h5 className="font-semibold text-xs text-[#1F1B18]">Calm Points Rewards Program</h5>
-                      <p className="text-[11px] text-[#79716B]">Points earning for orders, reviews, and ritual completions</p>
-                    </div>
-                    <button
-                      onClick={() => handleToggleFlag('enableRewards')}
-                      className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
-                        featureFlags.enableRewards ? 'bg-[#2A2521]' : 'bg-stone-300'
-                      }`}
-                    >
-                      <div
-                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                          featureFlags.enableRewards ? 'translate-x-6' : 'translate-x-0'
                         }`}
                       />
                     </button>

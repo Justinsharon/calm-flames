@@ -3,7 +3,6 @@ import path from 'path';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI } from '@google/genai';
 import { getActiveCatalog, getProductsByIds, getStoreSettings } from './src/server/catalogService';
 import { getShippingConfig, getCodConfig, computeShipping, type StoreSettings } from './src/lib/storeSettings';
 import { hasVerifiedPrice } from './src/lib/productMapping';
@@ -13,10 +12,13 @@ import {
   planReservationRelease
 } from './src/server/inventoryService';
 import { runTestHook } from './src/server/testHooks';
+import { rateLimit } from './src/server/rateLimit';
+import { suggestGifts } from './src/server/giftGuide';
+import { GIFT_GUIDE_MAX_INPUT } from './src/lib/giftGuide';
 import { priceCart, computeTotals, productIdsOf } from './src/server/quote';
 import { loadCoupon } from './src/server/couponService';
 import { newViewToken, hashViewToken, getOrderForViewer } from './src/server/orderView';
-import { sendOrderConfirmation } from './src/server/mailer';
+import { afterOrderPlaced } from './src/server/purchases';
 import { normalizeLines } from './src/lib/cartLines';
 import { validateCustomer, cleanCustomer } from './src/lib/checkoutForm';
 import { confirmOrderPaymentFromVerify, type VerifyTransitionOutcome } from './src/server/orderTransitions';
@@ -41,30 +43,29 @@ const CATALOG_UNAVAILABLE = {
   error: 'Product catalogue is temporarily unavailable. Please try again shortly.'
 };
 
+// Cloud Run sits behind one Google front end: req.ip = the real client (for rate limits).
+app.set('trust proxy', 1);
+
+/** Public POST limits per client IP (see src/server/rateLimit.ts). */
+export const limits = {
+  quote: rateLimit({ name: 'quote', windowMs: 60_000, max: 60 }),
+  order: rateLimit({ name: 'order', windowMs: 10 * 60_000, max: 20 }),
+  verify: rateLimit({ name: 'verify', windowMs: 60_000, max: 30 }),
+  newsletter: rateLimit({ name: 'newsletter', windowMs: 60 * 60_000, max: 5 }),
+  giftGuide: rateLimit({ name: 'giftGuide', windowMs: 10 * 60_000, max: 20 }),
+  support: rateLimit({ name: 'support', windowMs: 60 * 60_000, max: 5 }),
+  orderLookup: rateLimit({ name: 'orderLookup', windowMs: 10 * 60_000, max: 10 }),
+  orderView: rateLimit({ name: 'orderView', windowMs: 60_000, max: 60 })
+};
+
 app.use(
   express.json({
+    limit: '100kb',
     verify: (req: any, _res, buf) => {
       req.rawBody = buf;
     },
   })
 );
-
-// Initialize Google GenAI Server Client with required aistudio-build User-Agent
-// Created lazily: only used when GEMINI_API_KEY is set (it is optional on staging).
-let aiClient: GoogleGenAI | null = null;
-function getAi(): GoogleGenAI {
-  if (!aiClient) {
-    aiClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
-  }
-  return aiClient;
-}
 
 // Razorpay API calls must finish well inside the 60s claim/lease window so a slow gateway call
 // cannot outlive this worker's ownership of the attempt.
@@ -241,8 +242,8 @@ async function quoteHandler(req: Request, res: Response) {
     return res.status(500).json({ error: 'Server error during price validation.' });
   }
 }
-app.post('/api/cart/quote', quoteHandler);
-app.post('/api/cart/validate', quoteHandler);
+app.post('/api/cart/quote', limits.quote, quoteHandler);
+app.post('/api/cart/validate', limits.quote, quoteHandler);
 
 /**
  * 2. Create Order & Razorpay Order (Strict Server-Calculated Totals, Live Inventory Reservation & Durable Idempotency)
@@ -250,7 +251,7 @@ app.post('/api/cart/validate', quoteHandler);
  * Idempotent: Tracks requests via durable orderIdempotency collection and payload fingerprinting.
  * Fail-closed: Safely reconciles uncertain gateway timeouts and releases reservations on definitive failures.
  */
-app.post('/api/orders/create', async (req: Request, res: Response) => {
+app.post('/api/orders/create', limits.order, async (req: Request, res: Response) => {
   try {
     // Phase 4 owner switch: no orders at all until checkout is opened.
     if (process.env.CHECKOUT_ENABLED !== 'true') {
@@ -267,6 +268,17 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
       return res.status(400).json({ error: Object.values(customerErrors)[0], fields: customerErrors });
     }
     const customer = cleanCustomer(rawCustomer);
+
+    // Signed-in shoppers send their Firebase ID token so the order appears in their account.
+    let customerId: string | null = null;
+    const authz = String(req.headers.authorization || '');
+    if (authz.startsWith('Bearer ')) {
+      try {
+        customerId = (await getAdminAuth(getAdminApp()).verifyIdToken(authz.slice(7))).uid;
+      } catch {
+        return res.status(401).json({ error: 'Your sign-in has expired. Please sign in again or check out as a guest.' });
+      }
+    }
     if (giftMessage.length > 300) {
       return res.status(400).json({ error: 'Gift messages can be up to 300 characters.' });
     }
@@ -663,6 +675,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
           couponCode: appliedCoupon || null,
           giftMessage: giftMessage || null,
           viewTokenHash: hashViewToken(orderViewToken),
+          customerId,
           customer,
           reservationId: claimedReservationId,
           status: 'RESERVED',
@@ -895,7 +908,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
     }
 
     // Cash on delivery: the order is placed now (Razorpay orders confirm on payment).
-    if (paymentMethod === 'cod') void sendOrderConfirmation(claimedOrderNumber);
+    if (paymentMethod === 'cod') void afterOrderPlaced(claimedOrderNumber);
 
     return res.json({
       orderNumber: claimedOrderNumber,
@@ -923,7 +936,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
  * requires authenticated Razorpay API payment verification, fails closed on any error,
  * and consumes inventory reservation upon successful payment verification.
  */
-app.post('/api/payments/verify', async (req: Request, res: Response) => {
+app.post('/api/payments/verify', limits.verify, async (req: Request, res: Response) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, order_number } = req.body;
 
@@ -1129,7 +1142,7 @@ app.post('/api/payments/verify', async (req: Request, res: Response) => {
     if (outcome.kind === 'rejected') {
       return res.status(outcome.httpStatus).json({ verified: false, status: outcome.status, error: outcome.error });
     }
-    void sendOrderConfirmation(order_number);
+    void afterOrderPlaced(order_number);
     return res.json({
       verified: true,
       status: 'PAID',
@@ -1914,7 +1927,7 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
         throw transitionErr;
       }
 
-      if (transitionResult?.outcome === 'confirmed' && orderDocRef) void sendOrderConfirmation(orderDocRef.id);
+      if (transitionResult?.outcome === 'confirmed' && orderDocRef) void afterOrderPlaced(orderDocRef.id);
 
       return res.status(200).json({
         status: 'success',
@@ -1952,7 +1965,7 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
  * Order-confirmed page data. Needs the order's view token (header X-Order-Token), returned once by
  * /api/orders/create. Unknown order and wrong token both answer 404.
  */
-app.get('/api/orders/:orderNumber/view', async (req: Request, res: Response) => {
+app.get('/api/orders/:orderNumber/view', limits.orderView, async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
     const summary = await getOrderForViewer(req.params.orderNumber, req.headers['x-order-token']);
@@ -1964,7 +1977,24 @@ app.get('/api/orders/:orderNumber/view', async (req: Request, res: Response) => 
   }
 });
 
-app.post('/api/newsletter', async (req: Request, res: Response) => {
+/**
+ * AI gift guide (Gifting page). Grounded on active, priced, in-stock Firestore products only;
+ * deterministic keyword match without GEMINI_API_KEY. Rate-limited; input capped.
+ */
+app.post('/api/gift-guide', limits.giftGuide, async (req: Request, res: Response) => {
+  const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+  if (!message) return res.status(400).json({ error: 'Tell us a little about who the gift is for.' });
+  if (message.length > GIFT_GUIDE_MAX_INPUT) return res.status(400).json({ error: `Please keep it under ${GIFT_GUIDE_MAX_INPUT} characters.` });
+  let catalog: Record<string, any>;
+  try {
+    catalog = await getActiveCatalog();
+  } catch {
+    return res.status(503).json(CATALOG_UNAVAILABLE);
+  }
+  return res.json(await suggestGifts(message, catalog));
+});
+
+app.post('/api/newsletter', limits.newsletter, async (req: Request, res: Response) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
     return res.status(400).json({ error: 'Please enter a valid email address.' });
@@ -2035,373 +2065,6 @@ app.post('/api/admin/maintenance/expire-reservations', async (req: Request, res:
 });
 
 /**
- * 5. PHASE 3: Gemini AI "Find Your Flame" Personalized Engine
- */
-app.post('/api/ai/find-flame', async (req: Request, res: Response) => {
-  try {
-    const { feeling, moment, scentPreference, intensity } = req.body;
-
-    let SERVER_CATALOG: Record<string, any>;
-    try {
-      SERVER_CATALOG = await getActiveCatalog();
-    } catch {
-      return res.status(503).json(CATALOG_UNAVAILABLE);
-    }
-
-    // Deterministic baseline match from the live catalogue
-    let chosenId = 'jumbo-tealight-mogra';
-    if (scentPreference === 'Woody' || scentPreference === 'Earthy' || feeling === 'Grounded' || moment === 'Morning reset') {
-      chosenId = 'royal-urli';
-    } else if (feeling === 'Uplifted' || moment === 'Meditation') {
-      chosenId = 'lotus-bloom';
-    } else if (feeling === 'Sensual' || moment === 'Bath' || moment === 'Date night') {
-      chosenId = 'peony-bloom';
-    } else if (moment === 'Gifting' || moment === 'Celebration') {
-      chosenId = 'ganpati-bappa-hamper';
-    } else if (feeling === 'Sleepy' || moment === 'Evening unwind') {
-      chosenId = 'golden-mogra-jar';
-    }
-
-    const baselineProduct =
-      SERVER_CATALOG[chosenId] || SERVER_CATALOG['jumbo-tealight-mogra'] || Object.values(SERVER_CATALOG)[0];
-    if (!baselineProduct) {
-      return res.status(404).json({ error: 'No products are available in the active catalogue.' });
-    }
-    chosenId = baselineProduct.id;
-
-    // Try Gemini if API key available
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        const prompt = `You are the scent curator for "The Calm Flame", an artisanal candle brand rooted in India's botanical heritage.
-Available canonical products:
-1. "jumbo-tealight-mogra": Hand-poured 25g jumbo tealight with authentic mogra blossom. Floral, Calm.
-2. "royal-urli": 5" Royal Botanical Urli with dried orange, whole cinnamon, star anise. Earthy/Spiced, Grounded.
-3. "lotus-bloom": Delicate sculpted lotus bloom candle. Fresh floral, Uplifted.
-4. "golden-mogra-jar": Handcrafted glass jar infused with pure mogra blossom. Floral, Sleepy/Restorative.
-5. "peony-bloom": Handcrafted layered peony blossom candle. Velvety floral, Sensual.
-6. "ganpati-bappa-hamper": Festive celebration gift set with handcrafted botanical candles. Gifting.
-
-Customer answers:
-- Current feeling: ${feeling || 'Seeking calm'}
-- Creating moment: ${moment || 'Evening unwind'}
-- Scent preference: ${scentPreference || 'Floral'}
-- Intensity: ${intensity || 'Balanced'}
-
-Task: Pick the single best matching product ID from the available canonical IDs above.
-Respond in valid JSON format:
-{
-  "productId": "jumbo-tealight-mogra" | "royal-urli" | "lotus-bloom" | "golden-mogra-jar" | "peony-bloom" | "ganpati-bappa-hamper",
-  "reason": "1-2 sentences warm, human, grounded reason without medical claims",
-  "ritual": {
-    "bestTime": "recommended time of day",
-    "setTheMood": "1 sentence setting suggestion",
-    "steps": ["Step 1", "Step 2", "Step 3", "Step 4"],
-    "mantra": "A short 1-sentence calming mantra"
-  }
-}`;
-
-        const aiResponse = await getAi().models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
-
-        const raw = aiResponse.text?.trim() || '';
-        const parsed = JSON.parse(raw);
-        if (SERVER_CATALOG[parsed.productId] && SERVER_CATALOG[parsed.productId].isActive) {
-          return res.json({
-            productId: parsed.productId,
-            productName: SERVER_CATALOG[parsed.productId].name,
-            reason: parsed.reason,
-            ritual: parsed.ritual,
-            poweredBy: 'gemini',
-          });
-        }
-      } catch (geminiErr) {
-        console.warn('Gemini find-flame fallback:', geminiErr);
-      }
-    }
-
-    // Fallback response
-    return res.json({
-      productId: chosenId,
-      productName: baselineProduct.name,
-      reason: `You seem to be seeking a softer rhythm (${feeling?.toLowerCase() || 'calm'} for a ${moment?.toLowerCase() || 'quiet evening'}). ${baselineProduct.name} brings grounding botanical notes that gently release the day.`,
-      ritual: {
-        bestTime: 'Evening unwind & twilight transition',
-        setTheMood: 'Dim the overhead lights, draw curtains, and enjoy quiet presence.',
-        steps: [
-          'Place your candle on a heat-safe flat surface.',
-          'Light your candle with a deliberate match strike.',
-          'Put your phone away and take three slow belly breaths.',
-          'Allow ten quiet minutes for the botanical essence to settle your thoughts.',
-        ],
-        mantra: 'The day is done. I allow stillness to arrive.',
-      },
-      poweredBy: 'deterministic',
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Could not generate flame match.' });
-  }
-});
-
-/**
- * 6. PHASE 3: AI Ritual Generator
- */
-app.post('/api/ai/ritual', async (req: Request, res: Response) => {
-  try {
-    const { productId, duration, context } = req.body;
-    if (!productId) {
-      return res.status(400).json({ error: 'Missing productId parameter.' });
-    }
-
-    let SERVER_CATALOG: Record<string, any>;
-    try {
-      SERVER_CATALOG = await getActiveCatalog();
-    } catch {
-      return res.status(503).json(CATALOG_UNAVAILABLE);
-    }
-    const candle = SERVER_CATALOG[productId];
-    if (!candle || candle.isActive === false || candle.isHistorical) {
-      return res.status(404).json({
-        error: `Product "${productId}" is not available in the active catalogue.`
-      });
-    }
-
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        const scentDesc = candle.fragrance || candle.scentFamily || 'botanical';
-        const prompt = `Create a mindful, realistic ${duration || '10-minute'} candle ritual for "${candle.name}" (${candle.scentFamily || 'Botanical'} notes: ${scentDesc}).
-Context: ${context || 'evening relaxation'}.
-Guidelines:
-- Mention "${candle.name}" naturally.
-- Keep it concise, calming, premium, and human.
-- Strictly NO medical or therapeutic claims.
-- Return valid JSON:
-{
-  "title": "${duration || '10-Minute'} ${candle.name} ${context || 'Pause'}",
-  "duration": "${duration || '10 minutes'}",
-  "context": "${context || 'Evening unwind'}",
-  "steps": [
-    "Step 1: lighting / setup",
-    "Step 2: breath / sensory grounding",
-    "Step 3: mindful activity",
-    "Step 4: soft closure"
-  ],
-  "mantra": "Short peaceful mantra"
-}`;
-
-        const aiResponse = await getAi().models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
-
-        const raw = aiResponse.text?.trim() || '';
-        const parsed = JSON.parse(raw);
-        return res.json(parsed);
-      } catch (geminiErr) {
-        console.warn('Gemini ritual generator fallback:', geminiErr);
-      }
-    }
-
-    // Baseline fallback
-    return res.json({
-      title: `${duration || '10-Minute'} ${candle.name} ${context || 'Evening Unwind'}`,
-      duration: duration || '10 minutes',
-      context: context || 'Evening unwind',
-      steps: [
-        `Dim bright overhead lighting and place your ${candle.name} safely on a heat-resistant surface.`,
-        'Light the wick mindfully and watch the steady flame for a moment of quiet stillness.',
-        `Take four slow breaths in through your nose, taking in the gentle aroma.`,
-        `Spend ${duration || 'ten minutes'} in screen-free calm, allowing your thoughts to settle.`,
-      ],
-      mantra: 'This quiet moment belongs entirely to me.',
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to create ritual.' });
-  }
-});
-
-/**
- * 7. PHASE 3: AI Shopping Assistant ("Ask The Calm Flame")
- */
-app.post('/api/ai/assistant', async (req: Request, res: Response) => {
-  try {
-    const { message, history } = req.body;
-
-    if (!message || typeof message !== 'string') {
-      return res.status(400).json({ error: 'Missing message prompt.' });
-    }
-
-    let SERVER_CATALOG: Record<string, any>;
-    try {
-      SERVER_CATALOG = await getActiveCatalog();
-    } catch {
-      return res.status(503).json(CATALOG_UNAVAILABLE);
-    }
-    const onlyActive = (ids: string[]) => ids.filter((id) => SERVER_CATALOG[id]);
-
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        const catalogSummary = Object.entries(SERVER_CATALOG)
-          .map(([id, p]: [string, any]) => `${id}: "${p.name}" (priceStatus: ${p.priceStatus}, scentFamily: ${p.scentFamily || 'Not specified'}, burnTime: ${p.burnTime || 'Not specified'}, fragrance: ${p.fragrance || 'Not specified'})`)
-          .join('\n');
-
-        const shipCfg = getShippingConfig(await loadStoreSettings());
-        const shippingLine = shipCfg
-          ? `- Free shipping on orders above ₹${shipCfg.freeShippingThreshold} across India (₹${shipCfg.shippingFee} below that).`
-          : '- Shipping charges are confirmed at checkout; do not quote a shipping price or free-shipping threshold.';
-        const systemPrompt = `You are the thoughtful concierge for "The Calm Flame", an artisanal candle brand rooted in India's botanical heritage.
-You provide warm, calm, helpful guidance about our products, scent notes, rituals, gifting, and candle care.
-
-Catalog Products:
-${catalogSummary}
-
-Brand Standards:
-${shippingLine}
-- Handcrafted artisanal candles and botanical creations.
-- Never invent product facts, fake prices, unverified burn times, or unreleased candles.
-- If a product price or specification is not specified in the catalogue, state that it is not specified or available upon enquiry.
-- Safety & Health: Never provide medical advice, diagnosis, or health claims.
-- Keep tone serene, unhurried, concise, and elegant.`;
-
-        const aiResponse = await getAi().models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: `${systemPrompt}\n\nCustomer question: ${message}`,
-        });
-
-        const mentionedIds = Object.values(SERVER_CATALOG)
-          .filter((p: any) => (aiResponse.text || '').toLowerCase().includes(String(p.name).toLowerCase()))
-          .map((p) => p.id)
-          .slice(0, 3);
-
-        return res.json({
-          reply: aiResponse.text?.trim() || 'I am here to help you discover the right candle and ritual for your space.',
-          suggestedProducts: mentionedIds.length > 0 ? mentionedIds : onlyActive(['jumbo-tealight-mogra', 'floral-lotus-urli']),
-        });
-      } catch (geminiErr) {
-        console.warn('Assistant fallback:', geminiErr);
-      }
-    }
-
-    // Smart deterministic Q&A fallback
-    const lower = message.toLowerCase();
-    let reply = 'Welcome to The Calm Flame. We handcraft botanical candles and festive designs rooted in quiet elegance.';
-    let suggested: string[] = ['jumbo-tealight-mogra'];
-
-    if (lower.includes('floral') || lower.includes('mogra') || lower.includes('warm') || lower.includes('comfort')) {
-      reply = 'If you love authentic florals, our Jumbo Tealight - Mogra and Golden Mogra Jar bring pure, delicate floral stillness.';
-      suggested = ['jumbo-tealight-mogra', 'golden-mogra-jar'];
-    } else if (lower.includes('urli') || lower.includes('ritual') || lower.includes('brass') || lower.includes('temple')) {
-      reply = 'Our Floral Lotus Urli and Royal Urli centerpiece vessels bring timeless Indian botanical heritage to sacred rituals.';
-      suggested = ['floral-lotus-urli', 'royal-urli'];
-    } else if (lower.includes('care') || lower.includes('wick') || lower.includes('burn')) {
-      reply = 'On your first burn, keep the flame lit for 2–3 hours until the wax pool touches the container edges. Trim the cotton wick to 1/4 inch before relighting.';
-    } else if (lower.includes('gift') || lower.includes('hamper') || lower.includes('festive')) {
-      reply = 'Our Ganpati Bappa Hamper and festive confections make exquisite handcrafted gifts presented in ceremonial boxes.';
-      suggested = ['ganpati-bappa-hamper'];
-    }
-
-    return res.json({ reply, suggestedProducts: onlyActive(suggested) });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Assistant service temporarily unavailable.' });
-  }
-});
-
-/**
- * 8. PHASE 3: Smart Gift Finder
- */
-app.post('/api/ai/gift', async (req: Request, res: Response) => {
-  try {
-    const { recipient, occasion, feeling } = req.body;
-
-    let SERVER_CATALOG: Record<string, any>;
-    try {
-      SERVER_CATALOG = await getActiveCatalog();
-    } catch {
-      return res.status(503).json(CATALOG_UNAVAILABLE);
-    }
-
-    let chosenId = 'ganpati-bappa-hamper';
-    if (feeling === 'Sensual' || recipient === 'Partner') {
-      chosenId = 'peony-bloom';
-    } else if (feeling === 'Calm' || occasion === 'Thank you') {
-      chosenId = 'jumbo-tealight-mogra';
-    } else if (feeling === 'Grounded' || occasion === 'Housewarming') {
-      chosenId = 'royal-urli';
-    }
-
-    const prod = SERVER_CATALOG[chosenId];
-    if (!prod || prod.isActive === false || prod.isHistorical) {
-      return res.status(404).json({ error: 'Gift product recommendation is currently unavailable in the active catalogue.' });
-    }
-
-    return res.json({
-      productId: prod.id,
-      productName: prod.name,
-      giftMessage: `A thoughtful gift for your ${recipient || 'special person'} on their ${occasion || 'celebration'}—inviting gentle ${feeling?.toLowerCase() || 'calm'} into their space.`,
-      price: hasVerifiedPrice(prod) ? prod.price : undefined,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Gift finder error.' });
-  }
-});
-
-/**
- * 9. PHASE 3: Product Comparison ("Which one is right for me?")
- */
-app.post('/api/ai/compare', async (req: Request, res: Response) => {
-  try {
-    const { productIds } = req.body;
-    if (!Array.isArray(productIds) || productIds.length === 0) {
-      return res.status(400).json({ error: 'Please provide at least one product ID to compare.' });
-    }
-
-    let SERVER_CATALOG: Record<string, any>;
-    try {
-      SERVER_CATALOG = await getActiveCatalog();
-    } catch {
-      return res.status(503).json(CATALOG_UNAVAILABLE);
-    }
-
-    const compared: any[] = [];
-    for (const id of productIds) {
-      const p = SERVER_CATALOG[id];
-      if (!p || p.isActive === false || p.isHistorical) {
-        return res.status(404).json({
-          error: `Product "${id}" is either unavailable or not found in the active catalogue.`
-        });
-      }
-      compared.push({
-        id: p.id,
-        name: p.name,
-        price: hasVerifiedPrice(p) ? p.price : undefined,
-        priceStatus: p.priceStatus,
-        scentFamily: p.scentFamily || 'Not specified',
-        burnTime: p.burnTime || 'Not specified',
-        weight: p.weight || 'Not specified',
-        howItFeels: p.howItFeels || [],
-        fragrance: p.fragrance || p.scentFamily || 'Not specified',
-        idealMoment: 'Moments of mindfulness and quiet celebration',
-      });
-    }
-
-    return res.json({
-      products: compared,
-      guidance: 'Compare fragrances, dimensions, and botanical elements to choose the flame best suited to your space.',
-    });
-  } catch (err) {
-    return res.status(500).json({ error: 'Comparison error.' });
-  }
-});
-
-// Configure Vite middleware in dev or static files in production
-/**
  * Every secret is optional (staging can run with none). Log which features are off so a missing
  * Secret Manager mapping is obvious in Cloud Run logs. Never logs secret values.
  */
@@ -2420,7 +2083,7 @@ export function featureStatus(env: NodeJS.ProcessEnv = process.env): { feature: 
     {
       feature: 'Gemini AI (GEMINI_API_KEY)',
       on: Boolean(env.GEMINI_API_KEY),
-      whenOff: 'AI endpoints use their deterministic fallbacks'
+      whenOff: 'the gift guide uses its deterministic keyword match'
     },
     {
       feature: 'Maintenance key (MAINTENANCE_SECRET)',
