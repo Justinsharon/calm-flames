@@ -130,7 +130,12 @@
 .sf .hero-media { position: absolute; inset: -40px; transition: transform 1.5s var(--ease-soft); }
 .sf .hero-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .sf .hero-plain { position: absolute; inset: 0; background: radial-gradient(ellipse at 30% 20%, rgba(123,30,46,.55), rgba(30,11,15,0) 60%), var(--color-ink); }
-.sf .hero-fade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(30,11,15,.3) 0%, rgba(30,11,15,0) 25%, rgba(30,11,15,.35) 60%, rgba(30,11,15,1) 100%); }
+.sf .hero-fade { position: absolute; inset: 0; background:
+  linear-gradient(90deg, rgba(20,8,11,.35) 0%, rgba(20,8,11,.15) 60%, rgba(20,8,11,0) 100%),
+  linear-gradient(180deg, rgba(20,8,11,.5) 0%, rgba(20,8,11,.5) 12%, rgba(20,8,11,.76) 26%, rgba(20,8,11,.8) 70%, rgba(30,11,15,1) 100%); }
+/* Small text over photos: a soft dark halo keeps it readable on bright spots (>= 4.5:1). */
+.sf .hero .crumb, .sf .hero .eyebrow, .sf .hero .hero-sub { text-shadow: 0 0 2px rgba(20,8,11,.9), 0 1px 14px rgba(20,8,11,.9); }
+.sf .hero .crumb { color: var(--color-muted); }
 
 /* ---- footer ---- */
 .sf .site-footer { background: var(--color-ink-3); color: var(--color-muted); border-top: 1px solid rgba(244,237,231,.1); }

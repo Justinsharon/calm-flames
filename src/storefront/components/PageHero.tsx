@@ -49,7 +49,7 @@ export const PageHero: React.FC<{
           {title}
         </h1>
         {sub && (
-          <p className="serif fade-in" style={{ animationDelay: '.6s', margin: '18px 0 0', maxWidth: 560, fontSize: 22, lineHeight: 1.45, color: 'var(--color-ivory-2)' }}>
+          <p className="serif fade-in hero-sub" style={{ animationDelay: '.6s', margin: '18px 0 0', maxWidth: 560, fontSize: 22, lineHeight: 1.45, color: 'var(--color-ivory-2)' }}>
             {sub}
           </p>
         )}
