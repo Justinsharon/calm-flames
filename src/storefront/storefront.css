@@ -178,3 +178,15 @@
   .sf .hero-media { transition: none; transform: none !important; }
   .sf .chip-scent:hover, .sf .btn-pri:hover, .sf .thumb:hover, .sf .guide-btn:hover { transform: none; }
 }
+
+/* Small phones: keep the header on one line. */
+.sf .site-header nav { flex-wrap: nowrap; }
+.sf .nav-btn { white-space: nowrap; }
+@media (max-width: 480px) {
+  .sf .site-header { padding: 18px 16px; gap: 10px; }
+  .sf .site-header nav { gap: 14px !important; }
+  .sf .site-header .wordmark .script { font-size: 24px !important; }
+  .sf .site-header .wordmark .serif { font-size: 22px !important; }
+  .sf .site-header .wordmark span:last-child { font-size: 9px !important; letter-spacing: .2em !important; }
+  .sf .nav-btn { letter-spacing: .14em; font-size: 11px; }
+}
