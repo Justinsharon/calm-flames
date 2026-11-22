@@ -11,3 +11,4 @@ coverage/
 *service-account*.json
 firebase-debug.log
 firestore-debug.log
+dist-server/
