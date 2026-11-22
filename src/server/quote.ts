@@ -62,10 +62,19 @@ export function productIdsOf(items: unknown): string[] {
   return ids;
 }
 
-function checkSellable(p: Product | undefined, id: unknown): QuoteError | null {
-  if (!p || p.isHistorical) return fail(`Product ${String(id)} is not available in the active catalogue.`);
+/**
+ * The cart quote names the reason (not found / historical); order creation answers unknown and
+ * historical products identically, as it always has.
+ */
+function checkSellable(p: Product | undefined, id: unknown, quote: boolean): QuoteError | null {
+  if (!p) return fail(quote ? `Product ${String(id)} not found.` : `Product ${String(id)} is not available in the active catalogue.`);
+  if (p.isHistorical) {
+    return fail(quote ? `${p.name} is a historical product and is no longer available in the active catalogue.` : `Product ${String(id)} is not available in the active catalogue.`);
+  }
   if (p.isActive === false) return fail(`${p.name} is no longer available in the active catalogue.`);
-  if (!hasVerifiedPrice(p)) return fail(`${p.name} does not have a verified retail price and cannot be ordered.`);
+  if (!hasVerifiedPrice(p)) {
+    return fail(quote ? `${p.name} does not have a verified retail price and is currently unavailable for online purchase.` : `${p.name} does not have a verified retail price and cannot be ordered.`);
+  }
   return null;
 }
 
@@ -103,7 +112,7 @@ export function priceCart(
       const contents: PricedBoxLine['contents'] = [];
       for (const id of l.productIds) {
         const p = typeof id === 'string' ? catalog.get(id.trim()) : undefined;
-        const bad = checkSellable(p, id);
+        const bad = checkSellable(p, id, opts.checkStock);
         if (bad) return bad;
         if (p!.boxEligible !== true) return fail(`${p!.name} cannot go in a gift box.`);
         contents.push({ productId: p!.id, productName: p!.name, unitPrice: p!.price });
@@ -135,7 +144,7 @@ export function priceCart(
     const l = raw as any;
     if (typeof l.productId !== 'string' || !l.productId.trim()) return fail('Invalid item format in order payload.');
     const p = catalog.get(l.productId.trim());
-    const bad = checkSellable(p, l.productId);
+    const bad = checkSellable(p, l.productId, opts.checkStock);
     if (bad) return bad;
     if (!isQty(l.quantity, MAX_LINE_QTY)) return fail(`Invalid quantity for ${p!.name}. Permitted range is 1 to ${MAX_LINE_QTY}.`);
     const totalPrice = p!.price * l.quantity;
