@@ -81,6 +81,10 @@ export async function fetchOrders(customerId?: string): Promise<OrderRecord[]> {
         customerId: data.customerId,
         date: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : data.date || 'Recent',
         items: data.items || [],
+        lines: Array.isArray(data.lines) ? data.lines : undefined,
+        giftMessage: data.giftMessage || null,
+        codFee: data.codFee || 0,
+        trackingUrl: data.trackingUrl || null,
         subtotal: data.subtotal || 0,
         discount: data.discount || 0,
         shipping: data.shipping || 0,
@@ -111,6 +115,10 @@ export async function fetchOrders(customerId?: string): Promise<OrderRecord[]> {
             customerId: data.customerId,
             date: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : data.date || 'Recent',
             items: data.items || [],
+            lines: Array.isArray(data.lines) ? data.lines : undefined,
+            giftMessage: data.giftMessage || null,
+            codFee: data.codFee || 0,
+            trackingUrl: data.trackingUrl || null,
             subtotal: data.subtotal || 0,
             discount: data.discount || 0,
             shipping: data.shipping || 0,
@@ -134,6 +142,17 @@ export async function fetchOrders(customerId?: string): Promise<OrderRecord[]> {
 /**
  * Update order status (Admin only)
  */
+/** Owner pastes the courier's tracking link (https only; empty clears it). */
+export async function updateOrderTracking(orderId: string, trackingUrl: string | null): Promise<void> {
+  const url = trackingUrl?.trim() || null;
+  if (url && !/^https:\/\/[^\s]+$/.test(url)) throw new Error('Tracking link must start with https://');
+  try {
+    await updateDoc(doc(db, 'orders', orderId), { trackingUrl: url, updatedAt: new Date().toISOString() });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
+  }
+}
+
 export async function updateOrderStatus(
   orderId: string,
   status: OrderRecord['status'],
