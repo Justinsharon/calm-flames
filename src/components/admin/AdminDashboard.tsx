@@ -40,13 +40,17 @@ import {
   subscribeAllProducts,
   updateProductCommercials,
   setProductStock,
-  uploadProductPhoto,
+  updateProductDetails,
   validateCommercialUpdate,
   validateStock,
-  validatePhoto,
   ALLOWED_PHOTO_TYPES
 } from '../../services/adminCatalogService';
 import { sortProducts } from '../../context/CatalogContext';
+import { ProductPhotosEditor } from './ProductPhotosEditor';
+import { ProductDetailsFields, detailsFormFromProduct, detailsUpdateFromForm, type DetailsForm } from './ProductDetailsFields';
+import { TaxonomyEditor } from './TaxonomyEditor';
+import { StoreSettingsEditor } from './StoreSettingsEditor';
+import { validateProductDetails } from '../../lib/adminValidation';
 import { Product, OrderRecord } from '../../types';
 
 interface AdminDashboardProps {
@@ -77,7 +81,7 @@ const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose }) => {
   const { user, profile, isAdmin } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'products' | 'inventory' | 'analytics' | 'reviews' | 'controls'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'products' | 'inventory' | 'analytics' | 'reviews' | 'controls' | 'taxonomy' | 'storeSettings'>('overview');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [inventory, setInventory] = useState<InventoryRecord[]>([]);
@@ -106,7 +110,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
     stock: 0,
     sortOrder: 0
   });
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [detailsForm, setDetailsForm] = useState<DetailsForm | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
@@ -156,7 +160,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
       stock: typeof invRecord?.availableQuantity === 'number' ? invRecord.availableQuantity : prod.availableStock ?? 0,
       sortOrder: prod.sortOrder ?? 0
     });
-    setPhotoFile(null);
+    setDetailsForm(detailsFormFromProduct(prod));
     setEditError(null);
   };
 
@@ -237,7 +241,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
     const problem =
       validateCommercialUpdate(commercial) ||
       validateStock(Number(editForm.stock)) ||
-      (photoFile ? validatePhoto(photoFile) : null);
+      (detailsForm ? validateProductDetails(detailsUpdateFromForm(detailsForm)) : null);
     if (problem) {
       setEditError(problem);
       return;
@@ -246,9 +250,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
     setSaving(true);
     setEditError(null);
     try {
-      if (photoFile) await uploadProductPhoto(editingProduct, photoFile);
       await updateProductCommercials(editingProduct.id, commercial);
       await setProductStock(editingProduct.id, Number(editForm.stock));
+      if (detailsForm) await updateProductDetails(editingProduct.id, detailsUpdateFromForm(detailsForm), editingProduct.tags || []);
 
       setFeedback(`Product "${commercial.name}" updated. The storefront updates automatically.`);
       setEditingProduct(null);
@@ -396,6 +400,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
             >
               <Sliders className="w-4 h-4" />
               <span>Feature Controls</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('taxonomy')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'taxonomy' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <Tag className="w-4 h-4" />
+              <span>Collections & Scents</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('storeSettings')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'storeSettings' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <DollarSign className="w-4 h-4" />
+              <span>Store Settings</span>
             </button>
           </div>
 
@@ -599,7 +621,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                 {/* Edit Product Modal */}
                 {editingProduct && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                    <form onSubmit={handleUpdateProduct} className="bg-[#FAF7F2] p-6 rounded-3xl border border-[#E5DCCE] max-w-lg w-full space-y-4 shadow-xl">
+                    <form onSubmit={handleUpdateProduct} className="bg-[#FAF7F2] p-6 rounded-3xl border border-[#E5DCCE] max-w-2xl w-full max-h-[90vh] overflow-y-auto space-y-4 shadow-xl">
                       <div className="flex justify-between items-center border-b border-[#E5DCCE] pb-3">
                         <h4 className="font-serif font-bold text-base text-[#1F1B18]">Edit {editingProduct.name}</h4>
                         <button type="button" onClick={() => setEditingProduct(null)}>
@@ -679,21 +701,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                         </div>
                       </div>
 
-                      <div>
-                        <label className="block text-[11px] font-medium text-[#79716B] mb-1">Product Photo</label>
-                        <div className="flex items-center gap-3">
-                          {editingProduct.image && (
-                            <img src={editingProduct.image} alt="" className="w-12 h-12 rounded-lg object-cover bg-stone-100" />
-                          )}
-                          <input
-                            type="file"
-                            accept={ALLOWED_PHOTO_TYPES.join(',')}
-                            onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
-                            className="text-xs text-[#79716B]"
-                          />
-                        </div>
-                        <p className="text-[10px] text-[#79716B] mt-1">JPEG, PNG or WebP, up to 5 MB. Replaces the main photo.</p>
-                      </div>
+                      <ProductPhotosEditor
+                        productId={editingProduct.id}
+                        images={(products.find((p) => p.id === editingProduct.id) || editingProduct).images || []}
+                        onMessage={(m) => setFeedback(m)}
+                      />
 
                       <div>
                         <label className="block text-[11px] font-medium text-[#79716B] mb-1">Tagline</label>
@@ -704,6 +716,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                           className="w-full px-3 py-2 rounded-xl border border-[#DBC4A9] bg-white text-xs text-[#1F1B18]"
                         />
                       </div>
+
+                      {detailsForm && <ProductDetailsFields form={detailsForm} onChange={setDetailsForm} />}
 
                       {editError && (
                         <p role="alert" className="text-[11px] text-rose-700">{editError}</p>
@@ -1048,6 +1062,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
             )}
 
             {/* TAB: FEATURE CONTROLS / FLAGS */}
+            {activeTab === 'taxonomy' && <TaxonomyEditor onMessage={(m) => setFeedback(m)} />}
+            {activeTab === 'storeSettings' && <StoreSettingsEditor onMessage={(m) => setFeedback(m)} />}
+
             {activeTab === 'controls' && (
               <div className="space-y-6">
                 <div>

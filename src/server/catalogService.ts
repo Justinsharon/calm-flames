@@ -44,3 +44,14 @@ export async function getActiveCatalog(): Promise<Record<string, Product>> {
     throw new CatalogUnavailableError(e);
   }
 }
+
+/** settings/store via firebase-admin, parsed (malformed fields dropped). Throws if unreadable. */
+export async function getStoreSettings(): Promise<import('../lib/storeSettings').StoreSettings> {
+  const { parseStoreSettings } = await import('../lib/storeSettings');
+  try {
+    const snap = await getAdminDb().collection('settings').doc('store').get();
+    return parseStoreSettings(snap.exists ? snap.data() : {});
+  } catch (e) {
+    throw new CatalogUnavailableError(e);
+  }
+}

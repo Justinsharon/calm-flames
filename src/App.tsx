@@ -28,6 +28,7 @@ import { PolicyModals, PolicyModalType } from './components/modals/PolicyModals'
 import { Footer } from './components/footer/Footer';
 import { Product, BrandCategoryKey, OrderRecord } from './types';
 import { CatalogProvider, useCatalog } from './context/CatalogContext';
+import { StoreSettingsProvider } from './context/StoreSettingsContext';
 import { testFirestoreConnection } from './lib/firebase';
 import { Heart, Sparkles } from 'lucide-react';
 
@@ -278,11 +279,13 @@ export default function App() {
   return (
     <AuthProvider>
       <CatalogProvider>
+        <StoreSettingsProvider>
         <CartProvider>
           <WishlistProvider>
             <MainContent />
           </WishlistProvider>
         </CartProvider>
+        </StoreSettingsProvider>
       </CatalogProvider>
     </AuthProvider>
   );

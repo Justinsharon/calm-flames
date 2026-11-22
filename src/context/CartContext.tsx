@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { useCatalog } from './CatalogContext';
+import { useStoreSettings } from './StoreSettingsContext';
+import { computeShipping } from '../lib/storeSettings';
 import { hasVerifiedPrice } from '../lib/productMapping';
 import { Product, CartItem } from '../types';
 import { auth, db } from '../lib/firebase';
@@ -19,8 +21,10 @@ interface CartContextType {
   appliedCoupon: string | null;
   applyCouponCode: (code: string) => Promise<{ success: boolean; message: string }>;
   removeCoupon: () => void;
-  freeShippingThreshold: number;
+  /** Null until the owner sets shipping in settings/store (then free-shipping UI is hidden). */
+  freeShippingThreshold: number | null;
   amountNeededForFreeShipping: number;
+  shippingConfigured: boolean;
   isCartOpen: boolean;
   setIsCartOpen: (open: boolean) => void;
   isCheckoutOpen: boolean;
@@ -31,8 +35,6 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 const CART_STORAGE_KEY = 'the_calm_flame_cart';
-const FREE_SHIPPING_THRESHOLD = 1500;
-const STANDARD_SHIPPING_FEE = 99;
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -45,6 +47,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const { getProductById, loading: catalogLoading, error: catalogError } = useCatalog();
+  const { shipping: shippingCfg } = useStoreSettings();
 
   // Stored cart lines hold a product snapshot; always show the LIVE catalogue version (current
   // price/photo). Once the catalogue has loaded, lines whose product is no longer active or no
@@ -210,9 +213,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const totalItems = resolvedCart.reduce((sum, item) => sum + item.quantity, 0);
   const subtotal = resolvedCart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  const shippingFee = subtotal >= FREE_SHIPPING_THRESHOLD || subtotal === 0 ? 0 : STANDARD_SHIPPING_FEE;
+  // No shipping configured -> no shipping is quoted (the server refuses to price checkout).
+  const shippingFee = shippingCfg ? computeShipping(subtotal, shippingCfg) : 0;
   const totalAmount = Math.max(0, subtotal - discount + shippingFee);
-  const amountNeededForFreeShipping = Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal);
+  const amountNeededForFreeShipping = shippingCfg ? Math.max(0, shippingCfg.freeShippingThreshold - subtotal) : 0;
 
   const applyCouponCode = async (code: string): Promise<{ success: boolean; message: string }> => {
     const codeClean = code.trim().toUpperCase();
@@ -298,7 +302,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         appliedCoupon,
         applyCouponCode,
         removeCoupon,
-        freeShippingThreshold: FREE_SHIPPING_THRESHOLD,
+        freeShippingThreshold: shippingCfg ? shippingCfg.freeShippingThreshold : null,
+        shippingConfigured: Boolean(shippingCfg),
         amountNeededForFreeShipping,
         isCartOpen,
         setIsCartOpen,

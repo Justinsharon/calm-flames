@@ -4,6 +4,7 @@ import { X, Heart, ShoppingBag, Flame, Sparkles, Check, Clock, ShieldCheck, Leaf
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
 import { useAuth } from '../../context/AuthContext';
+import { useStoreSettings } from '../../context/StoreSettingsContext';
 import { reviewsService, ProductReview } from '../../services/reviewsService';
 import { rewardsService } from '../../services/rewardsService';
 import { RitualGeneratorModal } from '../rituals/RitualGeneratorModal';
@@ -30,6 +31,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
 
   const { addToCart } = useCart();
+  const { shipping } = useStoreSettings();
   const { isInWishlist, toggleWishlist } = useWishlist();
   const { user, profile, setIsAuthModalOpen } = useAuth();
 
@@ -315,7 +317,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                       <Check className="w-3.5 h-3.5" />
                       Hand-Poured Soy Craft
                     </span>
-                    <span>Free Shipping over ₹1,500</span>
+                    {shipping && <span>Free Shipping over ₹{shipping.freeShippingThreshold.toLocaleString('en-IN')}</span>}
                   </div>
 
                   {product.priceStatus !== 'missing' && product.price > 0 ? (

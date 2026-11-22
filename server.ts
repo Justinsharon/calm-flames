@@ -4,7 +4,8 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
-import { getActiveCatalog, getProductsByIds } from './src/server/catalogService';
+import { getActiveCatalog, getProductsByIds, getStoreSettings } from './src/server/catalogService';
+import { getShippingConfig, getCodConfig, computeShipping, type StoreSettings } from './src/lib/storeSettings';
 import { hasVerifiedPrice } from './src/lib/productMapping';
 import {
   reserveInventoryTransaction,
@@ -25,7 +26,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+// Cloud Run injects PORT; 3000 for local dev.
+const PORT = Number(process.env.PORT) || 3000;
 
 const CATALOG_UNAVAILABLE = {
   error: 'Product catalogue is temporarily unavailable. Please try again shortly.'
@@ -40,14 +42,21 @@ app.use(
 );
 
 // Initialize Google GenAI Server Client with required aistudio-build User-Agent
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
-  },
-});
+// Created lazily: only used when GEMINI_API_KEY is set (it is optional on staging).
+let aiClient: GoogleGenAI | null = null;
+function getAi(): GoogleGenAI {
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+  return aiClient;
+}
 
 // Razorpay API calls must finish well inside the 60s claim/lease window so a slow gateway call
 // cannot outlive this worker's ownership of the attempt.
@@ -96,8 +105,18 @@ async function recordOrphanMapping(
   }
 }
 
-const FREE_SHIPPING_THRESHOLD = 1500;
-const STANDARD_SHIPPING_FEE = 99;
+// Shipping and COD come from Firestore settings/store (owner-entered). Unset = not available.
+const SHIPPING_NOT_CONFIGURED = {
+  error: 'Shipping is not configured yet, so totals cannot be calculated. Checkout is unavailable.'
+};
+async function loadStoreSettings(): Promise<StoreSettings | null> {
+  try {
+    return await getStoreSettings();
+  } catch (e) {
+    console.error('Could not read settings/store:', e);
+    return null;
+  }
+}
 
 /**
  * Global Checkout Readiness Gate
@@ -145,10 +164,12 @@ app.get('/api/checkout/readiness', async (_req: Request, res: Response) => {
   // Explicit owner switch (Phase 4). Prices are now editable live in Firebase, so a fully priced
   // catalogue alone must never turn real checkout on.
   const checkoutSwitchOn = process.env.CHECKOUT_ENABLED === 'true';
+  const storeSettingsConfigured = Boolean(getShippingConfig(await loadStoreSettings()));
 
   // Real checkout must remain disabled unless every condition is satisfied
   const isCheckoutEnabled =
     checkoutSwitchOn &&
+    storeSettingsConfigured &&
     databaseAvailable &&
     inventoryConfigured &&
     hasPaymentCredentials &&
@@ -168,6 +189,7 @@ app.get('/api/checkout/readiness', async (_req: Request, res: Response) => {
       paymentCredentialsConfigured: hasPaymentCredentials,
       webhookSecretConfigured: hasWebhookSecret,
       checkoutSwitchOn,
+      storeSettingsConfigured,
     },
     message: isCheckoutEnabled
       ? 'All production checkout gates verified.'
@@ -277,7 +299,9 @@ app.post('/api/cart/validate', async (req: Request, res: Response) => {
       }
     }
 
-    const shipping = calculatedSubtotal >= FREE_SHIPPING_THRESHOLD ? 0 : STANDARD_SHIPPING_FEE;
+    const shippingCfg = getShippingConfig(await loadStoreSettings());
+    if (!shippingCfg) return res.status(503).json(SHIPPING_NOT_CONFIGURED);
+    const shipping = computeShipping(calculatedSubtotal, shippingCfg);
     const finalTotal = Math.max(0, calculatedSubtotal - discount + shipping);
 
     return res.json({
@@ -388,8 +412,23 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
       if (codeClean === 'FIRSTFLAME' && subtotal >= 999) discount = 150;
     }
 
-    const shipping = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : STANDARD_SHIPPING_FEE;
-    const total = Math.max(0, subtotal - discount + shipping);
+    if (paymentMethod !== 'razorpay' && paymentMethod !== 'cod') {
+      return res.status(400).json({ error: 'Unsupported payment method.' });
+    }
+    const storeSettings = await loadStoreSettings();
+    const shippingCfg = getShippingConfig(storeSettings);
+    if (!shippingCfg) return res.status(503).json(SHIPPING_NOT_CONFIGURED);
+    const shipping = computeShipping(subtotal, shippingCfg);
+    let codFee = 0;
+    if (paymentMethod === 'cod') {
+      const cod = getCodConfig(storeSettings);
+      if (!cod) return res.status(400).json({ error: 'Cash on delivery is not available.' });
+      codFee = cod.codFee;
+      if (subtotal - discount + shipping + codFee > cod.codMaxOrder) {
+        return res.status(400).json({ error: `Cash on delivery is available for orders up to ₹${cod.codMaxOrder}.` });
+      }
+    }
+    const total = Math.max(0, subtotal - discount + shipping + codFee);
 
     const normalizedItems = [...items]
       .map((i: any) => ({ productId: String(i.productId).trim(), quantity: Number(i.quantity) }))
@@ -718,6 +757,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
           subtotal,
           discount,
           shipping,
+          codFee,
           total,
           expectedAmountPaise: Math.round(total * 100),
           currency: 'INR',
@@ -2110,7 +2150,7 @@ Respond in valid JSON format:
   }
 }`;
 
-        const aiResponse = await ai.models.generateContent({
+        const aiResponse = await getAi().models.generateContent({
           model: 'gemini-3.8-flash',
           contents: prompt,
           config: {
@@ -2203,7 +2243,7 @@ Guidelines:
   "mantra": "Short peaceful mantra"
 }`;
 
-        const aiResponse = await ai.models.generateContent({
+        const aiResponse = await getAi().models.generateContent({
           model: 'gemini-3.8-flash',
           contents: prompt,
           config: {
@@ -2262,6 +2302,10 @@ app.post('/api/ai/assistant', async (req: Request, res: Response) => {
           .map(([id, p]: [string, any]) => `${id}: "${p.name}" (priceStatus: ${p.priceStatus}, scentFamily: ${p.scentFamily || 'Not specified'}, burnTime: ${p.burnTime || 'Not specified'}, fragrance: ${p.fragrance || 'Not specified'})`)
           .join('\n');
 
+        const shipCfg = getShippingConfig(await loadStoreSettings());
+        const shippingLine = shipCfg
+          ? `- Free shipping on orders above ₹${shipCfg.freeShippingThreshold} across India (₹${shipCfg.shippingFee} below that).`
+          : '- Shipping charges are confirmed at checkout; do not quote a shipping price or free-shipping threshold.';
         const systemPrompt = `You are the thoughtful concierge for "The Calm Flame", an artisanal candle brand rooted in India's botanical heritage.
 You provide warm, calm, helpful guidance about our products, scent notes, rituals, gifting, and candle care.
 
@@ -2269,14 +2313,14 @@ Catalog Products:
 ${catalogSummary}
 
 Brand Standards:
-- Free shipping on orders above ₹1,500 across India.
+${shippingLine}
 - Handcrafted artisanal candles and botanical creations.
 - Never invent product facts, fake prices, unverified burn times, or unreleased candles.
 - If a product price or specification is not specified in the catalogue, state that it is not specified or available upon enquiry.
 - Safety & Health: Never provide medical advice, diagnosis, or health claims.
 - Keep tone serene, unhurried, concise, and elegant.`;
 
-        const aiResponse = await ai.models.generateContent({
+        const aiResponse = await getAi().models.generateContent({
           model: 'gemini-3.8-flash',
           contents: `${systemPrompt}\n\nCustomer question: ${message}`,
         });
@@ -2407,11 +2451,56 @@ app.post('/api/ai/compare', async (req: Request, res: Response) => {
 });
 
 // Configure Vite middleware in dev or static files in production
+/**
+ * Every secret is optional (staging can run with none). Log which features are off so a missing
+ * Secret Manager mapping is obvious in Cloud Run logs. Never logs secret values.
+ */
+export function featureStatus(env: NodeJS.ProcessEnv = process.env): { feature: string; on: boolean; whenOff: string }[] {
+  return [
+    {
+      feature: 'Razorpay payments (RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET)',
+      on: Boolean((env.RAZORPAY_KEY_ID || env.VITE_RAZORPAY_KEY_ID) && env.RAZORPAY_KEY_SECRET),
+      whenOff: 'online payment, payment verification and the abandoned-order Razorpay check are disabled'
+    },
+    {
+      feature: 'Razorpay webhook (RAZORPAY_WEBHOOK_SECRET)',
+      on: Boolean(env.RAZORPAY_WEBHOOK_SECRET),
+      whenOff: 'webhooks are rejected with 503'
+    },
+    {
+      feature: 'Gemini AI (GEMINI_API_KEY)',
+      on: Boolean(env.GEMINI_API_KEY),
+      whenOff: 'AI endpoints use their deterministic fallbacks'
+    },
+    {
+      feature: 'Maintenance key (MAINTENANCE_SECRET)',
+      on: Boolean(env.MAINTENANCE_SECRET && env.MAINTENANCE_SECRET.length >= 16),
+      whenOff: 'Cloud Scheduler cannot call the maintenance sweep (admin sign-in still can)'
+    },
+    {
+      feature: 'Real checkout (CHECKOUT_ENABLED=true)',
+      on: env.CHECKOUT_ENABLED === 'true',
+      whenOff: 'checkout readiness reports DISABLED'
+    }
+  ];
+}
+
+function logFeatureStatus() {
+  for (const f of featureStatus()) {
+    console.log(`[startup] ${f.on ? 'ON ' : 'OFF'} ${f.feature}${f.on ? '' : ` -> ${f.whenOff}`}`);
+  }
+}
+
 async function startServer() {
+  logFeatureStatus();
   if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    // Built storefront (vite build). Resolved from the working directory so it works both from
+    // source (tsx server.ts) and from the bundled server (dist-server/server.js) in the container.
+    const staticDir = process.env.STATIC_DIR || path.resolve(process.cwd(), 'dist');
+    app.use(express.static(staticDir, { index: false, maxAge: '1h' }));
     app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(path.resolve(staticDir, 'index.html'));
     });
   } else {
     const { createServer: createViteServer } = await import('vite');

@@ -17,12 +17,73 @@ service cloud.firestore {
         get(/databases/$(database)/documents/customers/$(request.auth.uid)).data.get('role', 'customer') == 'admin';
     }
 
+    // Taxonomy slugs (keep in sync with src/lib/taxonomy.ts)
+    function collectionSlugs() {
+      return ['pillar-sculptural', 'jar-candles', 'coconut-shell', 'urli-centrepieces', 'floral-bouquets'];
+    }
+    function scentFamilySlugs() {
+      return ['indian-botanical', 'floral', 'gourmand', 'spicy-resinous', 'luxury-woody', 'fresh-citrus'];
+    }
+    function occasionSlugs() {
+      return ['christmas', 'birthday', 'wedding', 'housewarming', 'corporate'];
+    }
+
+    function optNumber(d, k) {
+      return !(k in d) || (d[k] is number && d[k] >= 0);
+    }
+    function optString(d, k, maxLen) {
+      return !(k in d) || (d[k] is string && d[k].size() <= maxLen);
+    }
+    function optStringList(d, k, maxItems) {
+      return !(k in d) || (d[k] is list && d[k].size() <= maxItems);
+    }
+
     // A product write may never make an unpriced product buyable: 'active' needs a price > 0.
+    // Phase 4a fields are optional; older docs (legacy scentFamily labels, free-text tags) stay valid.
     function isValidProduct(d) {
       return d.price is number && d.price >= 0
         && d.priceStatus in ['active', 'missing']
         && (d.priceStatus != 'active' || d.price > 0)
-        && d.isActive is bool;
+        && d.isActive is bool
+        && (!('collection' in d) || d.collection in collectionSlugs())
+        && optString(d, 'scentFamily', 40)
+        && (!('notes' in d) || (d.notes is map && d.notes.keys().hasOnly(['top', 'heart', 'base'])))
+        && optNumber(d, 'burnTimeHours')
+        && optNumber(d, 'weightGrams')
+        && optString(d, 'sizeCm', 40)
+        && optString(d, 'ingredients', 2000)
+        && optString(d, 'shortDescription', 500)
+        && optString(d, 'description', 5000)
+        && optStringList(d, 'images', 12)
+        && optStringList(d, 'tags', 30)
+        && (!('occasions' in d) || (d.occasions is list && d.occasions.hasOnly(occasionSlugs())))
+        && (!('boxEligible' in d) || d.boxEligible is bool)
+        && optNumber(d, 'mrp');
+    }
+
+    function isValidTaxonomy(d, slug) {
+      return d.slug == slug
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 80
+        && d.sortOrder is number
+        && optString(d, 'description', 2000)
+        && optString(d, 'headerImage', 1000)
+        && d.keys().hasOnly(['slug', 'name', 'description', 'headerImage', 'sortOrder', 'updatedAt', 'createdAt']);
+    }
+
+    // settings/store: every field optional (unset = feature off). Detailed checks in
+    // src/lib/storeSettings.ts; rules enforce types and non-negative money.
+    function isValidStoreSettings(d) {
+      return d.keys().hasOnly(['freeShippingThreshold', 'shippingFee', 'codEnabled', 'codFee', 'codMaxOrder', 'buildABox', 'updatedAt'])
+        && optNumber(d, 'freeShippingThreshold')
+        && optNumber(d, 'shippingFee')
+        && (!('codEnabled' in d) || d.codEnabled is bool)
+        && optNumber(d, 'codFee')
+        && optNumber(d, 'codMaxOrder')
+        && (!('buildABox' in d) || (d.buildABox is map
+              && d.buildABox.keys().hasOnly(['sizes', 'ribbons', 'addOns'])
+              && d.buildABox.sizes is list && d.buildABox.sizes.size() <= 10
+              && (!('ribbons' in d.buildABox) || (d.buildABox.ribbons is list && d.buildABox.ribbons.size() <= 20))
+              && (!('addOns' in d.buildABox) || (d.buildABox.addOns is list && d.buildABox.addOns.size() <= 20))));
     }
 
     match /{document=**} {
@@ -34,6 +95,30 @@ service cloud.firestore {
       allow read: if resource == null || resource.data.isActive == true || isAdmin();
       allow create, update: if isAdmin() && isValidProduct(request.resource.data);
       allow delete: if isAdmin();
+    }
+
+    // Taxonomy (editable in admin). Only the fixed slugs may exist.
+    match /collections/{slug} {
+      allow read: if true;
+      allow create, update: if isAdmin() && slug in collectionSlugs() && isValidTaxonomy(request.resource.data, slug);
+      allow delete: if false;
+    }
+    match /scentFamilies/{slug} {
+      allow read: if true;
+      allow create, update: if isAdmin() && slug in scentFamilySlugs() && isValidTaxonomy(request.resource.data, slug);
+      allow delete: if false;
+    }
+    match /occasions/{slug} {
+      allow read: if true;
+      allow create, update: if isAdmin() && slug in occasionSlugs() && isValidTaxonomy(request.resource.data, slug);
+      allow delete: if false;
+    }
+
+    // Shop settings: public read (storefront needs shipping/COD), admin write.
+    match /settings/{docId} {
+      allow read: if docId == 'store';
+      allow create, update: if isAdmin() && docId == 'store' && isValidStoreSettings(request.resource.data);
+      allow delete: if false;
     }
 
     match /inventory/{productId} {

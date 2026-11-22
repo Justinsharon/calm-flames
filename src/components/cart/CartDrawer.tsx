@@ -25,7 +25,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     applyCouponCode,
     removeCoupon,
     freeShippingThreshold,
-    amountNeededForFreeShipping
+    amountNeededForFreeShipping,
+    shippingConfigured
   } = useCart();
 
   const [couponInput, setCouponInput] = useState('');
@@ -34,10 +35,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
   if (!isCartOpen) return null;
 
-  const freeShippingProgress = Math.min(
-    100,
-    Math.round((subtotal / freeShippingThreshold) * 100)
-  );
+  const freeShippingProgress = freeShippingThreshold
+    ? Math.min(100, Math.round((subtotal / freeShippingThreshold) * 100))
+    : 0;
 
   const handleApplyCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,7 +74,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             </button>
           </div>
 
-          {/* Free Mindful Shipping Progress Indicator */}
+          {/* Free Mindful Shipping Progress Indicator (hidden until shipping is configured) */}
+          {shippingConfigured && (
           <div className="px-6 py-3 bg-[#F2ECE1]/40 border-b border-[#E5DCCE] text-xs">
             {amountNeededForFreeShipping > 0 ? (
               <p className="text-[#65412E] mb-1.5 font-medium">
@@ -93,6 +94,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               />
             </div>
           </div>
+          )}
 
           {/* Cart Item List */}
           <div className="flex-1 overflow-y-auto px-6 py-4 divide-y divide-[#E5DCCE]/70">
@@ -242,7 +244,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 <div className="flex justify-between">
                   <span>Mindful Shipping</span>
                   <span className="font-semibold text-[#1F1B18] font-sans">
-                    {shippingFee === 0 ? 'FREE' : `₹${shippingFee}`}
+                    {!shippingConfigured ? 'To be confirmed' : shippingFee === 0 ? 'FREE' : `₹${shippingFee}`}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm font-bold text-[#1F1B18] pt-2 border-t border-[#E5DCCE]">

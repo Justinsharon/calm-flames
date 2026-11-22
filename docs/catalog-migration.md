@@ -98,3 +98,74 @@ emulators only.)
   save. The storefront updates within a second, without a redeploy.
 
 Checkout stays disabled regardless (it also needs `CHECKOUT_ENABLED=true`, which is Phase 4).
+
+---
+
+# Importing / updating products from a spreadsheet
+
+`npm run import:catalog` reads an **.xlsx** (first sheet) or **.csv** and updates Firestore
+`products`, matched on the **ID** column. It is a **dry run by default**: it prints what it would
+do per row and writes nothing until you add `--apply`.
+
+## Columns
+
+`ID, Name, Collection, Price, Stock, Short description, Full description, Scent family, Top notes,
+Heart notes, Base notes, Burn time, Weight, Size, Ingredients, Tags, Occasions, Box eligible`
+
+| Column | Accepts |
+|---|---|
+| ID | lowercase letters, digits, hyphens (the product's Firestore ID, e.g. `peony-bloom`) |
+| Collection | `pillar-sculptural`, `jar-candles`, `coconut-shell`, `urli-centrepieces`, `floral-bouquets` (or their names) |
+| Price | rupees, e.g. `899` or `₹1,299`. **> 0 makes the product buyable**; `0` makes it unbuyable |
+| Stock | whole number of units available (reserved units in open checkouts are kept) |
+| Scent family | `indian-botanical`, `floral`, `gourmand`, `spicy-resinous`, `luxury-woody`, `fresh-citrus` (or names) |
+| Top / Heart / Base notes | comma-separated |
+| Burn time | hours, e.g. `40` or `40 hours` |
+| Weight | grams, e.g. `200`, `200g` or `0.2 kg` |
+| Size | free text in cm, e.g. `8 x 10` |
+| Tags | `bestseller`, `new`, `limited` (comma-separated) |
+| Occasions | `christmas`, `birthday`, `wedding`, `housewarming`, `corporate` |
+| Box eligible | `yes` / `no` |
+
+## Rules
+
+- **A blank cell never changes anything.** To clear a field, use the admin dashboard.
+- **Prices only come from the Price column.** Nothing else sets a price.
+- **New IDs create hidden products** (`isActive: false`). Activate them in the admin dashboard.
+- **A row with any error is skipped entirely**; the other rows still apply.
+- Duplicate IDs in the file: the later row is reported as an error.
+
+## Photos
+
+Put photos in one folder named `<ID>-1.jpg`, `<ID>-2.jpg`, … (`.jpg`, `.jpeg`, `.png`, `.webp`, up
+to 5 MB). `-1` becomes the main photo, `-2` the hover photo. For a product with photos in the
+folder, the product's photo list is **replaced** by those files, in number order. Products with no
+photos in the folder are not touched. Re-running with the same files uploads nothing new.
+
+## Run it
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="$HOME/keys/calm-flames-admin.json"
+```
+
+```bash
+npm run import:catalog -- catalogue.xlsx --photos ./photos
+```
+
+Read the report: every row is `NEW`, `UPDATED` (with the fields that change), `UNCHANGED` or
+`ERROR` (with the reason). When it looks right:
+
+```bash
+npm run import:catalog -- catalogue.xlsx --photos ./photos --apply
+```
+
+Running the same file again should report every row `UNCHANGED`.
+
+## Taxonomy (collections, scent families, occasions)
+
+Create the 5 collections, 6 scent families and 5 occasions once (existing ones are never touched),
+then edit names, descriptions and header images in Admin → Collections & Scents:
+
+```bash
+npm run seed:taxonomy
+```

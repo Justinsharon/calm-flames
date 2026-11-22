@@ -1,0 +1,22 @@
+# Never send secrets, local state or build output to the build context
+.env*
+!.env.example
+*service-account*.json
+*.pem
+*.key
+node_modules
+dist
+dist-server
+coverage
+.git
+.github
+.claude
+*.log
+firebase-debug.log
+firestore-debug.log
+# Not needed in the image
+src/tests
+docs
+scripts
+Dockerfile
+.dockerignore

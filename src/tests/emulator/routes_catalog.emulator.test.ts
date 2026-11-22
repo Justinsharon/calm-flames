@@ -12,7 +12,7 @@ import { reserveInventoryTransaction } from '../../server/inventoryService';
 import { getAdminDb } from '../../server/firestoreAdmin';
 import { buildProductDoc } from '../../../scripts/catalog/migrate';
 import { CANONICAL_PRODUCTS, HISTORICAL_PRODUCTS } from '../../../scripts/catalog/canonicalCatalog';
-import { clearFirestore } from './helpers';
+import { clearFirestore, seedStoreSettings } from './helpers';
 
 async function seedCatalogue() {
   const db = getAdminDb();
@@ -47,6 +47,7 @@ describe('Catalogue-dependent routes (Firestore emulator, seeded catalogue)', ()
     delete process.env.GEMINI_API_KEY;
     await clearFirestore();
     await seedCatalogue();
+    await seedStoreSettings();
   });
 
   afterEach(() => {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, ShieldCheck, Check, ArrowRight, ShoppingBag, CreditCard, Truck, AlertCircle, Sparkles, Flame } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
+import { useStoreSettings } from '../../context/StoreSettingsContext';
 import { useAuth } from '../../context/AuthContext';
 import { CustomerDetails, OrderRecord } from '../../types';
 import { initializeRazorpayPayment, generateOrderId, OrderStorage } from '../../services/paymentService';
@@ -19,7 +20,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onClose,
   onOrderSuccess
 }) => {
-  const { cart, subtotal, shippingFee, totalAmount, discount, appliedCoupon, clearCart, validateCartWithServer } = useCart();
+  const { cart, subtotal, shippingFee, totalAmount, discount, appliedCoupon, clearCart, validateCartWithServer, shippingConfigured } = useCart();
+  const { cod } = useStoreSettings();
   const { user, profile } = useAuth();
 
   const [customer, setCustomer] = useState<CustomerDetails>({
@@ -421,7 +423,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <span className="ml-2 font-bold text-sm text-[#1F1B18] font-sans">₹{totalAmount}</span>
                 </div>
                 <span className="text-[11px] text-[#9E6D47]">
-                  {shippingFee === 0 ? 'Free Shipping Included' : '+ ₹99 Shipping'}
+                  {!shippingConfigured ? 'Shipping to be confirmed' : shippingFee === 0 ? 'Free Shipping Included' : `+ ₹${shippingFee} Shipping`}
                   {discount > 0 && ` · Saved ₹${discount}`}
                 </span>
               </div>
@@ -563,6 +565,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     </div>
                   </button>
 
+                  {cod && (
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('cod')}
@@ -578,10 +581,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         Cash on Delivery (COD)
                       </p>
                       <p className="text-[11px] text-[#79716B] mt-0.5">
-                        Pay upon doorstep delivery
+                        Pay upon doorstep delivery{cod.codFee > 0 ? ` (+ ₹${cod.codFee})` : ''}
                       </p>
                     </div>
                   </button>
+                  )}
                 </div>
               </div>
 
