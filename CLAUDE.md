@@ -57,7 +57,6 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
   (`src/lib/routes.ts`, react-router; server serves index.html with per-URL title/meta, 404s unknown paths).
   Home, Collection, Product, Scent, Gifting, Journal, Info, Support, 404. Content (journal, info pages, FAQ,
   contact, care) lives in Firestore `pages` (Admin → Pages & Journal; only published docs are public).
-  Sign in, Account are 4D (old drawers still used meanwhile).
 - **Phase 4C — Cart, box, checkout (on `phase-4c-cart-box-checkout`):** `/cart`, `/build-a-box` (hidden until
   `settings/store.buildABox`), `/checkout` ('Opening soon' unless `CHECKOUT_ENABLED=true` and readiness passes),
   `/order/:id/confirmed` (needs the view token from order creation). One server quote (`src/server/quote.ts`)
@@ -65,6 +64,14 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
   two INACTIVE); `/api/orders/create` refuses orders unless `CHECKOUT_ENABLED=true`. Confirmation email:
   `MAIL_PROVIDER=resend` + `RESEND_API_KEY` + `MAIL_FROM` (unset = log and skip). Local previews can point the
   storefront at the emulator with `VITE_FIRESTORE_EMULATOR_HOST`.
+- **Phase 4D — Accounts, gift guide, support (on `phase-4d-accounts-guide-support`):** Google-only sign-in
+  (`/sign-in` + modal), `/account` (Favourites in `customers/{uid}/wishlist`, Orders by `customerId`, saved
+  `addresses`), checkout prefill + ID token links orders to accounts. Gift guide `POST /api/gift-guide` (Gemini
+  over active/priced/in-stock products only; keyword fallback without `GEMINI_API_KEY`). Help & Support:
+  `POST /api/orders/lookup` (number + phone), `POST /api/support` (photo in Storage `support/{uuid}/`),
+  Admin → Support; optional `SUPPORT_NOTIFY_EMAIL`. Reviews: verified buyers only (server-written
+  `customers/{uid}/purchases`), pending until approved. Rewards, rituals, moodInteractions, analyticsEvents
+  removed; per-IP rate limits on public POSTs (`src/server/rateLimit.ts`; tests set `RATE_LIMIT_DISABLED=1`).
 - **Phase 4 — Go live:** owner enters prices/photos/settings in Firebase; owner sets Razorpay env vars +
   webhook; test payment; enable checkout; deploy to Cloud Run; point thecalmflames.com.
 - **Later:** UI polish.
