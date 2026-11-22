@@ -17,6 +17,8 @@ import { confirmOrderPaymentFromVerify, type VerifyTransitionOutcome } from './s
 import { expireStaleReservations, resolveMaxAgeMinutes } from './src/server/reservationExpiry';
 import { expireAbandonedOrders, resolveOrderMaxAgeMinutes } from './src/server/orderExpiry';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
+import fs from 'fs';
+import { resolveMeta, injectMeta } from './src/server/seo';
 import { getAdminApp } from './src/server/firestoreAdmin';
 import { getAdminDb, doc, getDoc, runTransaction } from './src/server/firestoreAdmin';
 
@@ -2035,6 +2037,30 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
 });
 
 /**
+ * Newsletter ("Join the Ritual"). Stored server-side only (clients cannot read or write the
+ * collection). Idempotent per email: re-subscribing changes nothing.
+ */
+app.post('/api/newsletter', async (req: Request, res: Response) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    return res.status(400).json({ error: 'Please enter a valid email address.' });
+  }
+  try {
+    const db = getAdminDb();
+    const id = crypto.createHash('sha256').update(email).digest('hex');
+    const ref = db.collection('newsletterSubscribers').doc(id);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) tx.create(ref, { email, source: 'storefront', createdAt: new Date().toISOString() });
+    });
+    return res.json({ subscribed: true });
+  } catch (err) {
+    console.error('Newsletter sign-up failed:', err);
+    return res.status(503).json({ error: 'Sign-up is unavailable right now. Please try again later.' });
+  }
+});
+
+/**
  * Maintenance: release stale inventory reservations that never became an order.
  * Auth (either):
  *  - `X-Maintenance-Key: <MAINTENANCE_SECRET>` (for Cloud Scheduler / cron), or
@@ -2491,16 +2517,24 @@ function logFeatureStatus() {
   }
 }
 
+// Unknown API paths are JSON 404s, never the storefront.
+app.all('/api/*', (_req: Request, res: Response) => {
+  res.status(404).json({ error: 'Not found.' });
+});
+
 async function startServer() {
   logFeatureStatus();
   if (process.env.NODE_ENV === 'production') {
     // Built storefront (vite build). Resolved from the working directory so it works both from
     // source (tsx server.ts) and from the bundled server (dist-server/server.js) in the container.
     const staticDir = process.env.STATIC_DIR || path.resolve(process.cwd(), 'dist');
+    const template = fs.readFileSync(path.resolve(staticDir, 'index.html'), 'utf8');
     app.use(express.static(staticDir, { index: false, maxAge: '1h' }));
-    app.get('*', (_req, res) => {
-      res.setHeader('Cache-Control', 'no-cache');
-      res.sendFile(path.resolve(staticDir, 'index.html'));
+    // Every non-API GET gets the SPA, with that URL's title/description (404 status if unknown).
+    app.get('*', async (req, res) => {
+      const meta = await resolveMeta(req.path);
+      res.status(meta.status).setHeader('Cache-Control', 'no-cache');
+      res.type('html').send(injectMeta(template, meta));
     });
   } else {
     const { createServer: createViteServer } = await import('vite');

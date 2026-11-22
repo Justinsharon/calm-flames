@@ -23,7 +23,7 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
 3. ~~Storefront reads static product data.~~ Fixed in Phase 3 (`CatalogContext`, realtime Firestore).
 4. ~~Server validates prices against the static catalogue.~~ Fixed in Phase 3 (`src/server/catalogService.ts`).
 5. ~~Product images bundled; admin cannot upload photos.~~ Fixed in Phase 3 (Storage + admin upload).
-   Six images stay bundled as decorative hero/story/category artwork (`src/data/siteContent.ts`).
+   One image stays bundled as the decorative home hero (`src/data/siteContent.ts`).
 6. 33 of 37 products unpriced (owner to fill in Firebase).
 7. ~~`App.tsx` seeds the catalogue on every visitor load.~~ Fixed in Phase 3 (`scripts/migrate-catalog.ts`).
 8. Phase 1.2.2 gaps in `server.ts`: `payment.failed` skips amount/currency checks when absent (~L1244, ~L1446);
@@ -53,6 +53,11 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
   description, images[], tags, occasions, boxEligible, mrp); taxonomy docs `collections/`, `scentFamilies/`,
   `occasions/`; `settings/store` (no defaults: unset = feature hidden; shipping unset = no totals);
   admin editors; `scripts/import-catalog.ts`.
+- **Phase 4B — Design pages (on `phase-4b-design-pages`):** new storefront from `docs/design/` with real URLs
+  (`src/lib/routes.ts`, react-router; server serves index.html with per-URL title/meta, 404s unknown paths).
+  Home, Collection, Product, Scent, Gifting, Journal, Info, Support, 404. Content (journal, info pages, FAQ,
+  contact, care) lives in Firestore `pages` (Admin → Pages & Journal; only published docs are public).
+  Cart, Build a Box, Checkout, Confirmed, Sign in, Account are 4C/4D (old drawers still used meanwhile).
 - **Phase 4 — Go live:** owner enters prices/photos/settings in Firebase; owner sets Razorpay env vars +
   webhook; test payment; enable checkout; deploy to Cloud Run; point thecalmflames.com.
 - **Later:** UI polish.
