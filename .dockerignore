@@ -18,5 +18,7 @@ firestore-debug.log
 src/tests
 docs
 scripts
+# ...except the build-time check that build:server runs (package.json)
+!scripts/check-server-deps.mjs
 Dockerfile
 .dockerignore
