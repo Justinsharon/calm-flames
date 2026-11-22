@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Home</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&amp;family=Nunito:wght@400;600;700&amp;family=Pinyon+Script&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#1E0B0F}
+a{color:#F4EDE7}a:hover{color:#fff}
+.w3{max-width:1280px;margin:0 auto;padding:0 clamp(20px,4vw,48px);box-sizing:border-box}
+.serif{font-family:'Cormorant Garamond',Georgia,serif}
+.script{font-family:'Pinyon Script','Cormorant Garamond',cursive;font-weight:400}
+.eyebrow{font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:#E0C9C3;margin:0 0 14px}
+.glass{background:rgba(244,237,231,.06);border:1px solid rgba(244,237,231,.14);backdrop-filter:blur(40px) saturate(1.2);border-radius:24px}
+@keyframes hx-drift{from{transform:scale(1.12)}to{transform:scale(1.2) translate3d(-2%,-1.5%,0)}}
+@keyframes hx-rise{from{opacity:0;transform:translateY(60%) scaleY(1.15)}to{opacity:1;transform:none}}
+@keyframes hx-fade{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes hx-pop{0%{transform:scale(0)}70%{transform:scale(1.12)}100%{transform:scale(1)}}
+@keyframes hx-grow{from{clip-path:inset(0 100% 0 0 round 50px)}to{clip-path:inset(0 0 0 0 round 50px)}}
+@keyframes hx-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@keyframes hx-scroll{0%{transform:translateY(-100%)}100%{transform:translateY(200%)}}
+@keyframes float3{0%,100%{transform:translateY(0) rotateY(-14deg) rotateX(6deg)}50%{transform:translateY(-14px) rotateY(-10deg) rotateX(4deg)}}
+.hx-drift{animation:hx-drift 24s ease-in-out infinite alternate}
+.hx-word{display:inline-block;opacity:0;animation:hx-rise 1.1s cubic-bezier(.2,.7,.2,1) forwards;transform-origin:50% 0}
+.hx-fade{opacity:0;animation:hx-fade .9s ease forwards}
+.hx-logo{animation:hx-pop .7s cubic-bezier(.34,1.56,.64,1) both;transition:transform .5s}
+.hx-logo:hover{transform:rotate(360deg)}
+.hx-bar{animation:hx-grow .9s .25s cubic-bezier(.65,0,.35,1) both}
+.hx-pill{position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 22px;border:0;border-radius:50px;background:rgba(244,237,231,.92);color:#3A2226;text-decoration:none;font:inherit;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;isolation:isolate;cursor:pointer}
+.hx-pill::before{content:'';position:absolute;left:50%;bottom:-36px;width:44px;height:44px;margin-left:-22px;border-radius:50%;background:#7B1E2E;transform:scale(0);transition:transform .45s cubic-bezier(.65,0,.35,1);z-index:-1}
+.hx-pill:hover::before,.hx-pill:focus-visible::before{transform:scale(4.2)}
+.hx-pill .hx-a,.hx-pill .hx-b{display:block;transition:transform .45s cubic-bezier(.65,0,.35,1)}
+.hx-pill .hx-b{position:absolute;left:0;right:0;text-align:center;transform:translateY(120%);color:#F4EDE7}
+.hx-pill:hover .hx-a,.hx-pill:focus-visible .hx-a{transform:translateY(-140%)}
+.hx-pill:hover .hx-b,.hx-pill:focus-visible .hx-b{transform:translateY(0)}
+.hx-pill:hover,.hx-pill:focus-visible{color:#3A2226}
+.hx-btn{border:0;background:none;font-family:inherit;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:52px;padding:0 30px;border-radius:999px;font-size:14px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;transition:background .25s,color .25s,border-color .25s,transform .25s}
+.hx-pri{background:#F4EDE7;color:#5C1622}.hx-pri:hover{background:#fff;color:#5C1622;transform:translateY(-2px)}
+.hx-out{border:1px solid rgba(244,237,231,.55);color:#F4EDE7}.hx-out:hover{background:rgba(244,237,231,.12);border-color:#F4EDE7;color:#fff}
+.hx-track{display:flex;width:max-content;animation:hx-marquee 28s linear infinite}
+.hx-marq:hover .hx-track{animation-play-state:paused}
+.hx-cue{position:absolute;inset:0;background:#F4EDE7;animation:hx-scroll 2.2s ease-in-out infinite}
+.p3{perspective:1100px}
+.t3{display:block;position:relative;transform-style:preserve-3d;transition:transform .6s cubic-bezier(.2,.7,.2,1),box-shadow .6s;text-decoration:none;color:#F4EDE7;will-change:transform}
+.t3:hover,.t3:focus-visible{transform:translateY(-10px) rotateX(7deg) rotateY(-7deg);box-shadow:0 40px 70px -20px rgba(0,0,0,.65)}
+.t3 .shine{position:absolute;inset:0;background:linear-gradient(115deg,rgba(255,255,255,0) 30%,rgba(255,255,255,.18) 45%,rgba(255,255,255,0) 60%);transform:translateX(-120%);transition:transform .9s;pointer-events:none;border-radius:inherit}
+.t3:hover .shine{transform:translateX(120%)}
+.t3 .lift{box-sizing:border-box;padding:0 18px;text-wrap:balance}
+.arch{border-radius:200px 200px 18px 18px;overflow:hidden;position:relative}
+.arch img{width:100%;height:340px;object-fit:cover;display:block;transition:transform .8s}
+.t3:hover .arch img{transform:scale(1.06)}
+.chip3{display:flex;align-items:center;gap:14px;padding:10px 20px 10px 10px;border-radius:999px;text-decoration:none;color:#F4EDE7;transition:transform .4s,background .3s,border-color .3s}
+.chip3:hover{transform:translateY(-4px) translateZ(20px);background:rgba(244,237,231,.12);border-color:rgba(244,237,231,.4);color:#fff}
+.card3{position:relative;display:flex;flex-direction:column;gap:10px}
+.ph3{position:relative;overflow:hidden;border-radius:18px;aspect-ratio:4/5;background:#2A1015}
+.ph3 img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .5s,transform .8s}
+.ph3 .alt{opacity:0}
+.card3:hover .ph3 .alt{opacity:1}
+.card3:hover .ph3 img{transform:scale(1.05)}
+.add3{opacity:0;transform:translateY(8px);transition:all .3s}
+.card3:hover .add3,.card3:focus-within .add3{opacity:1;transform:none}
+.box3{position:relative;height:440px;perspective:1200px}
+.box3 img{position:absolute;width:56%;height:78%;object-fit:cover;border-radius:18px;box-shadow:0 40px 70px -20px rgba(0,0,0,.7);border:1px solid rgba(244,237,231,.18)}
+.box3 .b1{left:2%;top:14%;transform:rotateY(18deg) rotateX(4deg) translateZ(-60px);opacity:.75}
+.box3 .b2{left:40%;top:4%;transform:rotateY(-18deg) rotateX(4deg) translateZ(-40px);opacity:.8}
+.box3 .b3{left:20%;top:18%;animation:float3 6s ease-in-out infinite;z-index:2}
+.ft3 a{display:block;color:#E0C9C3;text-decoration:none;font-size:14px;padding:4px 0}
+.ft3 a:hover{color:#fff}
+:focus-visible{outline:2px solid #F4EDE7;outline-offset:3px}
+@media (max-width:760px){.hx-navitems{display:none}.hx-burger{display:flex}.add3{opacity:1;transform:none}}
+@media (min-width:761px){.hx-burger{display:none}}
+@media (prefers-reduced-motion:reduce){.hx-drift,.hx-track,.hx-cue,.box3 .b3{animation:none}.hx-word,.hx-fade,.hx-logo,.hx-bar{animation:none;opacity:1;transform:none;clip-path:none}.t3,.t3:hover{transform:none}}
+</style>
+</helmet>
+
+<div onMouseMove="{{onMove}}" style="position: relative; width: 100%; background: #1E0B0F; color: #F4EDE7; font-family: 'Nunito', system-ui, sans-serif; font-size: 16px; line-height: 1.6; overflow: hidden">
+
+
+<section aria-label="Welcome" style="position: relative; min-height: 920px; overflow: hidden">
+<div style="position: absolute; inset: -40px; transform: {{parallax}}; transition: transform 1.5s cubic-bezier(.2,.7,.2,1)"><img class="hx-drift" src="/_blob/edbf2668868f8463ad6dc8ab30ffcaf9" alt="" style="width: 100%; height: 100%; object-fit: cover; object-position: 50% 40%; display: block"></div>
+<div aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(180deg, rgba(30,11,15,.25) 0%, rgba(30,11,15,0) 22%, rgba(30,11,15,0) 55%, rgba(30,11,15,.45) 75%, rgba(30,11,15,1) 100%)"></div>
+
+<header style="position: absolute; top: 0; left: 0; right: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 28px clamp(20px, 5vw, 72px)">
+<a href="Main.dc.html" aria-label="The Calm Flame, home" style="display: flex; align-items: baseline; gap: 6px; color: #F4EDE7; text-decoration: none; line-height: 1; text-shadow: 0 2px 18px rgba(30,11,15,.5)"><span class="script" style="font-size: 30px">the</span><span class="serif" style="font-size: 28px; font-weight: 500">Calm</span><span style="font-size: 11px; letter-spacing: .28em">FLAME</span></a>
+<nav aria-label="Main" style="display: flex; align-items: center; gap: 28px; font-size: 12px; font-weight: 700; letter-spacing: .24em; text-transform: uppercase; text-shadow: 0 2px 14px rgba(30,11,15,.6)">
+<button type="button" onClick="{{toggleMenu}}" aria-expanded="{{menuStr}}" style="background: none; border: 0; padding: 8px 0; color: #F4EDE7; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer">Menu</button>
+<a href="SignIn.dc.html" aria-label="Sign in" style="display: flex; padding: 6px 0"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 20.5c0-4 3.4-6.5 7.5-6.5s7.5 2.5 7.5 6.5"></path></svg></a>
+<a href="Cart.dc.html" aria-label="Cart, 2 items" style="text-decoration: none; padding: 8px 0">Cart (2)</a>
+</nav>
+<sc-if value="{{menuOpen}}" hint-placeholder-val="{{ false }}">
+<div class="glass" style="position: absolute; top: 76px; right: clamp(20px, 5vw, 72px); width: min(560px, 90vw); padding: 28px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px; background: rgba(30,11,15,.78); box-shadow: 0 30px 70px rgba(0,0,0,.5)">
+<div style="display: flex; flex-direction: column"><p class="eyebrow" style="margin-bottom: 8px">Collections</p><a href="Category.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Pillar &amp; Sculptural</a><a href="Category.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Jar Candles</a><a href="Category.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Coconut Shell</a><a href="Category.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Urli &amp; Centrepieces</a><a href="Category.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Floral &amp; Bouquets</a></div>
+<div style="display: flex; flex-direction: column"><p class="eyebrow" style="margin-bottom: 8px">Explore</p><a href="Scent.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Shop by Scent</a><a href="Gifting.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Gifting</a><a href="BuildBox.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Build a Box</a><a href="Journal.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Journal</a><a href="Info.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Our Story</a><a href="Support.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Help &amp; Support</a><a href="SignIn.dc.html" style="padding: 6px 0; text-decoration: none; font-size: 15px">Sign in · Favourites</a></div>
+</div>
+</sc-if>
+</header>
+
+<div style="position: relative; z-index: 10; min-height: 920px; box-sizing: border-box; padding: 150px clamp(20px, 5vw, 72px) 220px; display: flex; flex-direction: column; justify-content: flex-end">
+<p class="hx-fade eyebrow" style="animation-delay: .2s; margin-bottom: 8px">Hand-poured in India · Natural wax · Pure botanicals</p>
+<h1 aria-label="Light. Breathe. Be." class="script" style="margin: 0; font-size: clamp(5rem, 13vw, 210px); line-height: .95; color: #F4EDE7; text-shadow: 0 6px 40px rgba(30,11,15,.45)"><sc-for list="{{words}}" as="w" hint-placeholder-count="3"><span class="hx-word" aria-hidden="true" style="animation-delay: {{w.d}}">{{w.text}}</span> </sc-for></h1>
+<div class="hx-fade" style="animation-delay: 1.1s; display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end; justify-content: space-between; margin-top: 28px">
+<p class="serif" style="margin: 0; max-width: 440px; font-size: 24px; line-height: 1.4; color: #F3E6E1">Candles that slow an evening down: mogra, sandalwood, rose and oud, poured by hand in small batches.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 14px"><a href="Category.dc.html" class="hx-btn hx-pri">Shop the collections</a><a href="BuildBox.dc.html" class="hx-btn hx-out">Build a gift box</a></div>
+</div>
+</div>
+<div aria-hidden="true" class="hx-fade" style="animation-delay: 1.6s; position: absolute; z-index: 10; right: clamp(20px, 5vw, 72px); top: 45%; display: flex; flex-direction: column; align-items: center; gap: 12px; font-size: 10px; letter-spacing: .3em; text-transform: uppercase; color: #EBD3CB; writing-mode: vertical-rl">Scroll<span style="position: relative; width: 1px; height: 64px; background: rgba(244,237,231,.25); overflow: hidden"><span class="hx-cue"></span></span></div>
+</section>
+
+<section aria-label="Why The Calm Flame" class="w3" style="position: relative; z-index: 15; margin-top: -150px; perspective: 1000px">
+<div class="glass" style="background: rgba(92,22,34,.34); box-shadow: 0 30px 80px rgba(0,0,0,.4); transform: {{tilt}}; transition: transform 1s cubic-bezier(.2,.7,.2,1); overflow: hidden">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px; padding: 32px 36px">
+<div style="display: flex; gap: 14px; align-items: center"><span style="width: 48px; height: 48px; flex: none; border-radius: 24px; border: 1px solid rgba(244,237,231,.3); display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EBC9BF" stroke-width="1.5" aria-hidden="true"><path d="M12 3c2 3 4 4.5 4 8a4 4 0 01-8 0c0-3.5 2-5 4-8z"></path><path d="M12 15v6"></path></svg></span><span style="font-size: 14px"><strong style="display: block; font-size: 15px">Handmade</strong><span style="color: #E0C9C3">Poured in small batches</span></span></div><div style="display: flex; gap: 14px; align-items: center"><span style="width: 48px; height: 48px; flex: none; border-radius: 24px; border: 1px solid rgba(244,237,231,.3); display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EBC9BF" stroke-width="1.5" aria-hidden="true"><path d="M5 19c8 0 14-6 14-14C11 5 5 11 5 19z"></path><path d="M5 19l8-8"></path></svg></span><span style="font-size: 14px"><strong style="display: block; font-size: 15px">Natural wax</strong><span style="color: #E0C9C3">Soy &amp; coconut, pure oils</span></span></div><div style="display: flex; gap: 14px; align-items: center"><span style="width: 48px; height: 48px; flex: none; border-radius: 24px; border: 1px solid rgba(244,237,231,.3); display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EBC9BF" stroke-width="1.5" aria-hidden="true"><rect x="3" y="7" width="18" height="12" rx="2"></rect><path d="M3 11h18"></path></svg></span><span style="font-size: 14px"><strong style="display: block; font-size: 15px">Cash on delivery</strong><span style="color: #E0C9C3">Or UPI, cards, netbanking</span></span></div><div style="display: flex; gap: 14px; align-items: center"><span style="width: 48px; height: 48px; flex: none; border-radius: 24px; border: 1px solid rgba(244,237,231,.3); display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EBC9BF" stroke-width="1.5" aria-hidden="true"><path d="M4 12a8 8 0 0114-5"></path><path d="M18 3v4h-4"></path><path d="M20 12a8 8 0 01-14 5"></path><path d="M6 21v-4h4"></path></svg></span><span style="font-size: 14px"><strong style="display: block; font-size: 15px">Easy returns</strong><span style="color: #E0C9C3">On unopened candles</span></span></div>
+</div>
+<div class="hx-marq" aria-label="Our botanicals: sandalwood, mogra, rose, oud, bergamot, neroli, vetiver, cardamom" style="border-top: 1px solid rgba(244,237,231,.14); padding: 18px 0; overflow: hidden"><div class="hx-track" aria-hidden="true"><sc-for list="{{marquee}}" as="m" hint-placeholder-count="16"><span style="padding: 0 30px; font-size: 12px; font-weight: 700; letter-spacing: .3em; text-transform: uppercase; color: rgba(244,237,231,.6); white-space: nowrap; display: inline-flex; align-items: center; gap: 30px">{{m}}<span style="color: #C9A396">✦</span></span></sc-for></div></div>
+</div>
+</section>
+
+<section class="w3" style="padding-top: 130px; padding-bottom: 110px">
+<div style="text-align: center; margin-bottom: 52px"><p class="eyebrow">Shop by collection</p><h2 class="serif" style="margin: 0; font-weight: 400; font-size: clamp(2.4rem, 4.6vw, 64px); line-height: 1.05">Our <span class="script" style="font-size: 1.3em; color: #EBC9BF">Collections</span></h2></div>
+<div class="p3" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 26px">
+<a href="Category.dc.html" class="t3" style="border-radius: 200px 200px 18px 18px"><div class="arch"><img src="/_blob/84fd34caff154baaabcdfb3c538bc87c" alt="Pillar candles crowned with dried flowers"><div aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(180deg, rgba(30,11,15,0) 50%, rgba(30,11,15,.85))"></div><span class="shine" aria-hidden="true"></span></div><span class="lift" style="position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; display: flex; flex-direction: column"><span class="serif" style="font-size: 24px; line-height: 1.15">Pillar &amp; Sculptural</span><span style="font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #EBC9BF; margin-top: 6px">Explore →</span></span></a><a href="Category.dc.html" class="t3" style="border-radius: 200px 200px 18px 18px"><div class="arch"><img src="/_blob/2214cdaeaaa23465f0f8c17e36287be3" alt="Candle in a dark vessel with dried oranges and star anise"><div aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(180deg, rgba(30,11,15,0) 50%, rgba(30,11,15,.85))"></div><span class="shine" aria-hidden="true"></span></div><span class="lift" style="position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; display: flex; flex-direction: column"><span class="serif" style="font-size: 24px; line-height: 1.15">Jar Candles</span><span style="font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #EBC9BF; margin-top: 6px">Explore →</span></span></a><a href="Category.dc.html" class="t3" style="border-radius: 200px 200px 18px 18px"><div class="arch"><img src="/_blob/d18fc1a480667d40558b5a6bab266191" alt="Coconut shell candles with dried hydrangea"><div aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(180deg, rgba(30,11,15,0) 50%, rgba(30,11,15,.85))"></div><span class="shine" aria-hidden="true"></span></div><span class="lift" style="position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; display: flex; flex-direction: column"><span class="serif" style="font-size: 24px; line-height: 1.15">Coconut Shell</span><span style="font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #EBC9BF; margin-top: 6px">Explore →</span></span></a><a href="Category.dc.html" class="t3" style="border-radius: 200px 200px 18px 18px"><div class="arch"><img src="/_blob/18f5d9541d31dd6c53083cfdf3c666bd" alt="Terracotta bowl candle with dried florals"><div aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(180deg, rgba(30,11,15,0) 50%, rgba(30,11,15,.85))"></div><span class="shine" aria-hidden="true"></span></div><span class="lift" style="position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; display: flex; flex-direction: column"><span class="serif" style="font-size: 24px; line-height: 1.15">Urli &amp; Centrepieces</span><span style="font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #EBC9BF; margin-top: 6px">Explore →</span></span></a><a href="Category.dc.html" class="t3" style="border-radius: 200px 200px 18px 18px"><div class="arch"><img src="/_blob/81cf33003aee31f7f2457a1679c41ec6" alt="Candle surrounded by scattered rose petals"><div aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(180deg, rgba(30,11,15,0) 50%, rgba(30,11,15,.85))"></div><span class="shine" aria-hidden="true"></span></div><span class="lift" style="position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; display: flex; flex-direction: column"><span class="serif" style="font-size: 24px; line-height: 1.15">Floral &amp; Bouquets</span><span style="font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #EBC9BF; margin-top: 6px">Explore →</span></span></a>
+</div>
+</section>
+
+<section class="w3" style="padding-bottom: 110px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 44px"><div><p class="eyebrow">Loved by our customers</p><h2 class="serif" style="margin: 0; font-weight: 400; font-size: clamp(2.4rem, 4.6vw, 64px); line-height: 1.05"><span class="script" style="font-size: 1.3em; color: #EBC9BF">Bestsellers</span></h2></div><a href="Category.dc.html" style="font-weight: 700; font-size: 14px; letter-spacing: .06em">View all candles →</a></div>
+<div class="p3" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px">
+<div class="card3"><a href="Product.dc.html" class="t3 ph3" aria-label="Rose Bud Coconut Candle"><img src="/_blob/aedbd511270d9ce410e9ed29c4db3975" alt="Rose Bud Coconut Candle"><img class="alt" src="/_blob/81cf33003aee31f7f2457a1679c41ec6" alt=""><span class="shine" aria-hidden="true"></span></a><a href="SignIn.dc.html" aria-label="Save to favourites" style="position: absolute; top: 12px; right: 12px; z-index: 3; width: 42px; height: 42px; border-radius: 21px; border: 1px solid rgba(244,237,231,.3); background: rgba(30,11,15,.45); backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F4EDE7" stroke-width="1.6" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.6-7 10-7 10z"></path></svg></a><a href="Product.dc.html" class="serif" style="font-size: 23px; text-decoration: none; line-height: 1.2; margin-top: 6px">Rose Bud Coconut Candle</a><span style="font-size: 13px; color: #E0C9C3">Floral · rose, neroli</span><span style="font-weight: 700">₹1,250</span><a href="Cart.dc.html" class="hx-btn hx-pri add3">Add to cart</a></div><div class="card3"><a href="Product.dc.html" class="t3 ph3" aria-label="Lavender Coconut Bowl"><img src="/_blob/facc01aa25b8a7b091919d536a590b59" alt="Lavender Coconut Bowl"><img class="alt" src="/_blob/115263d1c5c34c76c0b536b63940d390" alt=""><span class="shine" aria-hidden="true"></span></a><a href="SignIn.dc.html" aria-label="Save to favourites" style="position: absolute; top: 12px; right: 12px; z-index: 3; width: 42px; height: 42px; border-radius: 21px; border: 1px solid rgba(244,237,231,.3); background: rgba(30,11,15,.45); backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F4EDE7" stroke-width="1.6" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.6-7 10-7 10z"></path></svg></a><a href="Product.dc.html" class="serif" style="font-size: 23px; text-decoration: none; line-height: 1.2; margin-top: 6px">Lavender Coconut Bowl</a><span style="font-size: 13px; color: #E0C9C3">Floral · lavender</span><span style="font-weight: 700">₹1,150</span><a href="Cart.dc.html" class="hx-btn hx-pri add3">Add to cart</a></div><div class="card3"><a href="Product.dc.html" class="t3 ph3" aria-label="Coffee &amp; Cinnamon Terracotta"><img src="/_blob/08c2a638de465a95ffa519baba0964ba" alt="Coffee &amp; Cinnamon Terracotta"><img class="alt" src="/_blob/640da0d05075ec53dd2c06a60c386264" alt=""><span class="shine" aria-hidden="true"></span></a><a href="SignIn.dc.html" aria-label="Save to favourites" style="position: absolute; top: 12px; right: 12px; z-index: 3; width: 42px; height: 42px; border-radius: 21px; border: 1px solid rgba(244,237,231,.3); background: rgba(30,11,15,.45); backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F4EDE7" stroke-width="1.6" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.6-7 10-7 10z"></path></svg></a><a href="Product.dc.html" class="serif" style="font-size: 23px; text-decoration: none; line-height: 1.2; margin-top: 6px">Coffee &amp; Cinnamon Terracotta</a><span style="font-size: 13px; color: #E0C9C3">Gourmand · coffee, vanilla</span><span style="font-weight: 700">₹1,350</span><a href="Cart.dc.html" class="hx-btn hx-pri add3">Add to cart</a></div><div class="card3"><a href="Product.dc.html" class="t3 ph3" aria-label="Spiced Orange Coconut"><img src="/_blob/efea96e911fa3233272b4531f63e52fa" alt="Spiced Orange Coconut"><img class="alt" src="/_blob/2214cdaeaaa23465f0f8c17e36287be3" alt=""><span class="shine" aria-hidden="true"></span></a><a href="SignIn.dc.html" aria-label="Save to favourites" style="position: absolute; top: 12px; right: 12px; z-index: 3; width: 42px; height: 42px; border-radius: 21px; border: 1px solid rgba(244,237,231,.3); background: rgba(30,11,15,.45); backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F4EDE7" stroke-width="1.6" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.6-7 10-7 10z"></path></svg></a><a href="Product.dc.html" class="serif" style="font-size: 23px; text-decoration: none; line-height: 1.2; margin-top: 6px">Spiced Orange Coconut</a><span style="font-size: 13px; color: #E0C9C3">Spicy &amp; Resinous · cardamom</span><span style="font-weight: 700">₹1,250</span><a href="Cart.dc.html" class="hx-btn hx-pri add3">Add to cart</a></div>
+</div>
+</section>
+
+<section class="w3" style="padding-top: 0; padding-bottom: 110px">
+<div class="glass" style="display: flex; flex-wrap: wrap; align-items: center; gap: 40px; padding: clamp(28px, 4vw, 56px); background: linear-gradient(135deg, rgba(123,30,46,.55), rgba(92,22,34,.25)); box-shadow: 0 40px 90px -30px rgba(0,0,0,.7)">
+<div class="box3" aria-hidden="true" style="flex: 1 1 420px; min-width: 0"><img class="b1" src="/_blob/84fd34caff154baaabcdfb3c538bc87c" alt=""><img class="b2" src="/_blob/81cf33003aee31f7f2457a1679c41ec6" alt=""><img class="b3" src="/_blob/d18fc1a480667d40558b5a6bab266191" alt=""></div>
+<div style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<p class="eyebrow" style="margin: 0">Build a Box</p>
+<h2 class="serif" style="margin: 0; font-weight: 400; font-size: clamp(2.4rem, 4.6vw, 60px); line-height: 1.05">The gift, <span class="script" style="font-size: 1.25em; color: #EBC9BF">made by you</span></h2>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px"><li style="display: flex; gap: 14px; align-items: center"><span class="serif" style="font-size: 22px; width: 40px; height: 40px; flex: none; border: 1px solid rgba(235,201,191,.6); border-radius: 20px; display: flex; align-items: center; justify-content: center">1</span>Choose a box of 3, 4 or 6</li><li style="display: flex; gap: 14px; align-items: center"><span class="serif" style="font-size: 22px; width: 40px; height: 40px; flex: none; border: 1px solid rgba(235,201,191,.6); border-radius: 20px; display: flex; align-items: center; justify-content: center">2</span>Pick the candles you love</li><li style="display: flex; gap: 14px; align-items: center"><span class="serif" style="font-size: 22px; width: 40px; height: 40px; flex: none; border: 1px solid rgba(235,201,191,.6); border-radius: 20px; display: flex; align-items: center; justify-content: center">3</span>Add a handwritten note. We wrap it.</li></ol>
+<div><a href="BuildBox.dc.html" class="hx-btn hx-pri">Start building →</a></div>
+</div>
+</div>
+</section>
+
+<section style="position: relative; background: #2A1015; overflow: hidden">
+<div aria-hidden="true" style="position: absolute; width: 700px; height: 700px; left: -200px; top: -200px; background: radial-gradient(circle, rgba(123,30,46,.6), rgba(123,30,46,0) 65%)"></div>
+<div class="w3" style="position: relative; display: flex; flex-wrap: wrap; gap: 56px; align-items: center; padding-top: 110px; padding-bottom: 110px">
+<div style="flex: 1 1 320px; min-width: 0"><p class="eyebrow">Shop by scent</p><h2 class="serif" style="margin: 0 0 20px; font-weight: 400; font-size: clamp(2.4rem, 4.6vw, 64px); line-height: 1.05">Find your <span class="script" style="font-size: 1.3em; color: #EBC9BF">scent</span></h2><p style="color: #E0C9C3; margin: 0 0 30px; max-width: 360px">Six fragrance families, each made from real oils and botanicals. Start with how you want the room to feel.</p><a href="Scent.dc.html" class="hx-btn hx-out">Explore all scents</a></div>
+<div class="p3" style="flex: 2 1 560px; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px">
+<a href="Scent.dc.html" class="chip3 glass"><img src="/_blob/ec5c7947dd817e0c052fa4505a4273b9" alt="" style="width: 60px; height: 60px; border-radius: 30px; object-fit: cover; box-shadow: 0 10px 24px rgba(0,0,0,.45)"><span style="display: flex; flex-direction: column; line-height: 1.3"><span class="serif" style="font-size: 22px">Indian Botanical</span><span style="font-size: 13px; color: #E0C9C3">Sandalwood · Vetiver · Mogra</span></span></a><a href="Scent.dc.html" class="chip3 glass"><img src="/_blob/aedbd511270d9ce410e9ed29c4db3975" alt="" style="width: 60px; height: 60px; border-radius: 30px; object-fit: cover; box-shadow: 0 10px 24px rgba(0,0,0,.45)"><span style="display: flex; flex-direction: column; line-height: 1.3"><span class="serif" style="font-size: 22px">Floral</span><span style="font-size: 13px; color: #E0C9C3">Rose · Neroli · Peony · Tuberose</span></span></a><a href="Scent.dc.html" class="chip3 glass"><img src="/_blob/115263d1c5c34c76c0b536b63940d390" alt="" style="width: 60px; height: 60px; border-radius: 30px; object-fit: cover; box-shadow: 0 10px 24px rgba(0,0,0,.45)"><span style="display: flex; flex-direction: column; line-height: 1.3"><span class="serif" style="font-size: 22px">Gourmand</span><span style="font-size: 13px; color: #E0C9C3">Vanilla · Coffee</span></span></a><a href="Scent.dc.html" class="chip3 glass"><img src="/_blob/2214cdaeaaa23465f0f8c17e36287be3" alt="" style="width: 60px; height: 60px; border-radius: 30px; object-fit: cover; box-shadow: 0 10px 24px rgba(0,0,0,.45)"><span style="display: flex; flex-direction: column; line-height: 1.3"><span class="serif" style="font-size: 22px">Spicy &amp; Resinous</span><span style="font-size: 13px; color: #E0C9C3">Cardamom · Frankincense</span></span></a><a href="Scent.dc.html" class="chip3 glass"><img src="/_blob/edbf2668868f8463ad6dc8ab30ffcaf9" alt="" style="width: 60px; height: 60px; border-radius: 30px; object-fit: cover; box-shadow: 0 10px 24px rgba(0,0,0,.45)"><span style="display: flex; flex-direction: column; line-height: 1.3"><span class="serif" style="font-size: 22px">Luxury Woody</span><span style="font-size: 13px; color: #E0C9C3">Oud</span></span></a><a href="Scent.dc.html" class="chip3 glass"><img src="/_blob/640da0d05075ec53dd2c06a60c386264" alt="" style="width: 60px; height: 60px; border-radius: 30px; object-fit: cover; box-shadow: 0 10px 24px rgba(0,0,0,.45)"><span style="display: flex; flex-direction: column; line-height: 1.3"><span class="serif" style="font-size: 22px">Fresh Citrus</span><span style="font-size: 13px; color: #E0C9C3">Bergamot</span></span></a>
+</div>
+</div>
+</section>
+
+<section>
+<div class="w3" style="padding-top: 110px; padding-bottom: 20px">
+<div style="text-align: center; margin-bottom: 52px"><p class="eyebrow">Gifting</p><h2 class="serif" style="margin: 0; font-weight: 400; font-size: clamp(2.4rem, 4.6vw, 64px); line-height: 1.05">For every <span class="script" style="font-size: 1.3em; color: #EBC9BF">celebration</span></h2></div>
+<div class="p3" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 20px">
+<a href="Gifting.dc.html" class="t3" style="border-radius: 18px; overflow: hidden; aspect-ratio: 3/4"><img src="/_blob/2214cdaeaaa23465f0f8c17e36287be3" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block"><span aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(30,11,15,.9), rgba(30,11,15,0) 60%)"></span><span class="shine" aria-hidden="true"></span><span class="lift" style="position: absolute; left: 20px; right: 20px; bottom: 20px"><span class="script" style="font-size: 44px; display: block; line-height: 1">Christmas</span><span style="font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #EBC9BF">Shop gifts →</span></span></a><a href="Gifting.dc.html" class="t3" style="border-radius: 18px; overflow: hidden; aspect-ratio: 3/4"><img src="/_blob/81cf33003aee31f7f2457a1679c41ec6" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block"><span aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(30,11,15,.9), rgba(30,11,15,0) 60%)"></span><span class="shine" aria-hidden="true"></span><span class="lift" style="position: absolute; left: 20px; right: 20px; bottom: 20px"><span class="script" style="font-size: 44px; display: block; line-height: 1">Birthday</span><span style="font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #EBC9BF">Shop gifts →</span></span></a><a href="Gifting.dc.html" class="t3" style="border-radius: 18px; overflow: hidden; aspect-ratio: 3/4"><img src="/_blob/edbf2668868f8463ad6dc8ab30ffcaf9" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block"><span aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(30,11,15,.9), rgba(30,11,15,0) 60%)"></span><span class="shine" aria-hidden="true"></span><span class="lift" style="position: absolute; left: 20px; right: 20px; bottom: 20px"><span class="script" style="font-size: 44px; display: block; line-height: 1">Wedding</span><span style="font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #EBC9BF">Shop gifts →</span></span></a><a href="Gifting.dc.html" class="t3" style="border-radius: 18px; overflow: hidden; aspect-ratio: 3/4"><img src="/_blob/ec5c7947dd817e0c052fa4505a4273b9" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block"><span aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(30,11,15,.9), rgba(30,11,15,0) 60%)"></span><span class="shine" aria-hidden="true"></span><span class="lift" style="position: absolute; left: 20px; right: 20px; bottom: 20px"><span class="script" style="font-size: 44px; display: block; line-height: 1">Housewarming</span><span style="font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #EBC9BF">Shop gifts →</span></span></a><a href="Gifting.dc.html" class="t3" style="border-radius: 18px; overflow: hidden; aspect-ratio: 3/4"><img src="/_blob/18f5d9541d31dd6c53083cfdf3c666bd" alt="" style="width: 100%; height: 100%; object-fit: cover; display: block"><span aria-hidden="true" style="position: absolute; inset: 0; background: linear-gradient(to top, rgba(30,11,15,.9), rgba(30,11,15,0) 60%)"></span><span class="shine" aria-hidden="true"></span><span class="lift" style="position: absolute; left: 20px; right: 20px; bottom: 20px"><span class="script" style="font-size: 44px; display: block; line-height: 1">Corporate</span><span style="font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #EBC9BF">Bulk orders →</span></span></a>
+</div>
+</div>
+</section>
+
+<section class="w3" style="padding-top: 110px; padding-bottom: 60px; perspective: 1000px">
+<div class="glass" style="background: rgba(92,22,34,.3); text-align: center; padding: clamp(40px, 6vw, 88px) clamp(24px, 6vw, 96px); transform: {{tilt}}; transition: transform 1s cubic-bezier(.2,.7,.2,1); box-shadow: 0 30px 80px rgba(0,0,0,.4)">
+<p class="serif" style="margin: 0 0 24px; font-style: italic; font-size: 20px; color: rgba(244,237,231,.75)">Our story</p>
+<h2 class="serif" style="margin: 0 auto; max-width: 1000px; font-weight: 400; font-size: clamp(2.2rem, 4.6vw, 68px); line-height: 1.12">Poured by hand with <span class="script" style="color: #EBC9BF">mogra</span>, <span class="script" style="color: #EBC9BF">sandalwood</span> and <span class="script" style="color: #EBC9BF">rose</span>, so every evening can slow to the pace of a <em>flame</em>.</h2>
+<div style="margin-top: 36px"><a href="Info.dc.html" class="hx-btn hx-out">Read our story</a></div>
+</div>
+</section>
+
+<section class="w3" style="padding-top: 60px; padding-bottom: 110px">
+<div style="text-align: center; margin-bottom: 52px"><p class="eyebrow">Sample reviews</p><h2 class="serif" style="margin: 0; font-weight: 400; font-size: clamp(2.4rem, 4.6vw, 64px); line-height: 1.05">Quiet moments, <span class="script" style="font-size: 1.3em; color: #EBC9BF">shared</span></h2></div>
+<div class="p3" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px">
+<figure class="glass t3" style="margin: 0; padding: 36px"><p aria-label="5 out of 5 stars" style="color: #EBC9BF; letter-spacing: .2em; margin: 0 0 16px">★★★★★</p><blockquote class="serif" style="font-size: 23px; font-style: italic; line-height: 1.4; margin: 0 0 20px">"The mogra scent fills the whole living room without being heavy. It burned evenly for weeks."</blockquote><figcaption style="font-size: 13px; color: #E0C9C3">Ananya R. · Pune · Verified buyer</figcaption></figure><figure class="glass t3" style="margin: 0; padding: 36px"><p aria-label="5 out of 5 stars" style="color: #EBC9BF; letter-spacing: .2em; margin: 0 0 16px">★★★★★</p><blockquote class="serif" style="font-size: 23px; font-style: italic; line-height: 1.4; margin: 0 0 20px">"Gifted the urli for Diwali and everyone asked where it was from. Packed beautifully."</blockquote><figcaption style="font-size: 13px; color: #E0C9C3">Rohit M. · Bengaluru · Verified buyer</figcaption></figure><figure class="glass t3" style="margin: 0; padding: 36px"><p aria-label="5 out of 5 stars" style="color: #EBC9BF; letter-spacing: .2em; margin: 0 0 16px">★★★★★</p><blockquote class="serif" style="font-size: 23px; font-style: italic; line-height: 1.4; margin: 0 0 20px">"Calm, clean and very well made. I light it every evening with tea."</blockquote><figcaption style="font-size: 13px; color: #E0C9C3">Meera S. · Gurugram · Verified buyer</figcaption></figure>
+</div>
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px; margin: 110px 0 40px"><h2 class="serif" style="margin: 0; font-weight: 400; font-size: clamp(2rem, 3.6vw, 48px)">From the <span class="script" style="font-size: 1.3em; color: #EBC9BF">Journal</span></h2><a href="Journal.dc.html" style="font-weight: 700; font-size: 14px">All stories →</a></div>
+<div class="p3" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 28px">
+<a href="Journal.dc.html" class="t3" style="border-radius: 18px"><div style="overflow: hidden; border-radius: 18px; position: relative"><img src="/_blob/640da0d05075ec53dd2c06a60c386264" alt="" style="width: 100%; height: 250px; object-fit: cover; display: block"><span class="shine" aria-hidden="true"></span></div><span style="display: block; padding-top: 16px; font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #E0C9C3">Rituals</span><span class="serif" style="display: block; font-size: 27px; line-height: 1.2; margin-top: 6px">5 morning rituals to start the day slowly</span></a><a href="Journal.dc.html" class="t3" style="border-radius: 18px"><div style="overflow: hidden; border-radius: 18px; position: relative"><img src="/_blob/facc01aa25b8a7b091919d536a590b59" alt="" style="width: 100%; height: 250px; object-fit: cover; display: block"><span class="shine" aria-hidden="true"></span></div><span style="display: block; padding-top: 16px; font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #E0C9C3">Wellness</span><span class="serif" style="display: block; font-size: 27px; line-height: 1.2; margin-top: 6px">The science of scent and calm</span></a><a href="Journal.dc.html" class="t3" style="border-radius: 18px"><div style="overflow: hidden; border-radius: 18px; position: relative"><img src="/_blob/ec5c7947dd817e0c052fa4505a4273b9" alt="" style="width: 100%; height: 250px; object-fit: cover; display: block"><span class="shine" aria-hidden="true"></span></div><span style="display: block; padding-top: 16px; font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #E0C9C3">Heritage</span><span class="serif" style="display: block; font-size: 27px; line-height: 1.2; margin-top: 6px">India's botanical heritage, in wax</span></a>
+</div>
+</section>
+
+<section style="position: relative; overflow: hidden; background: #2A1015">
+<div aria-hidden="true" style="position: absolute; width: 800px; height: 800px; right: -250px; top: -300px; background: radial-gradient(circle, rgba(123,30,46,.6), rgba(123,30,46,0) 65%)"></div>
+<div class="w3" style="position: relative; text-align: center; padding-top: 96px; padding-bottom: 96px">
+<h2 class="serif" style="margin: 0 0 12px; font-weight: 400; font-size: clamp(2.2rem, 4vw, 56px)">Join the <span class="script" style="font-size: 1.3em; color: #EBC9BF">Ritual</span></h2>
+<p style="color: #E0C9C3; margin: 0 0 30px">New scents, festive drops and 10% off for your first order.</p>
+<div class="glass" style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: flex-end; max-width: 560px; margin: 0 auto; padding: 10px; border-radius: 999px">
+<label style="flex: 1 1 260px; display: flex; flex-direction: column; text-align: left; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #E0C9C3; padding-left: 18px">Email address<input type="email" placeholder="you@example.com" style="margin-top: 2px; min-height: 36px; padding: 0; border: 0; background: transparent; color: #F4EDE7; font: inherit; font-size: 15px; letter-spacing: 0; text-transform: none; outline-offset: 4px"></label>
+<a href="Main.dc.html" class="hx-btn hx-pri">Subscribe</a>
+</div>
+</div>
+</section>
+
+<footer class="ft3" style="background: #140608; color: #E0C9C3; border-top: 1px solid rgba(244,237,231,.1)">
+<div class="w3" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 40px; padding-top: 72px; padding-bottom: 48px">
+<div><span style="display: flex; align-items: baseline; gap: 6px; color: #F4EDE7; line-height: 1"><span class="script" style="font-size: 36px">the</span><span class="serif" style="font-size: 34px; font-weight: 500">Calm</span><span style="font-size: 13px; letter-spacing: .28em">flame</span></span><p style="font-size: 14px; margin: 16px 0 0">Handcrafted candles rooted in India's botanical heritage.</p></div>
+<div><p class="eyebrow">Shop</p><a href="Category.dc.html">Collections</a><a href="Scent.dc.html">Shop by Scent</a><a href="Gifting.dc.html">Gifting</a><a href="BuildBox.dc.html">Build a Box</a></div>
+<div><p class="eyebrow">Help</p><a href="Info.dc.html">Shipping</a><a href="Info.dc.html">Returns</a><a href="Info.dc.html">FAQ &amp; candle care</a><a href="Support.dc.html">Help &amp; Support</a></div>
+<div><p class="eyebrow">About</p><a href="Info.dc.html">Our Story</a><a href="Info.dc.html">Corporate gifting</a><a href="Info.dc.html">Privacy &amp; Terms</a></div>
+</div>
+<div class="w3" style="border-top: 1px solid rgba(244,237,231,.1); padding-top: 20px; padding-bottom: 28px; font-size: 13px">© The Calm Flame · Made in India</div>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":6900}}'>
+class Component extends DCLogic {
+renderVals() {
+const s = this.state || {};
+const mx = s.mx || 0, my = s.my || 0;
+const botanicals = ['Sandalwood', 'Mogra', 'Rose', 'Oud', 'Bergamot', 'Neroli', 'Vetiver', 'Cardamom'];
+return {
+words: ['Light.', 'Breathe.', 'Be.'].map((t, i) => ({ text: t, d: (0.35 + i * 0.22).toFixed(2) + 's' })),
+marquee: botanicals.concat(botanicals),
+parallax: 'translate3d(' + (mx * -30).toFixed(1) + 'px,' + (my * -30).toFixed(1) + 'px,0)',
+tilt: 'translate3d(' + (mx * 14).toFixed(1) + 'px,0,0) rotateY(' + (mx * 3).toFixed(2) + 'deg) rotateX(' + (my * -2).toFixed(2) + 'deg)',
+colsOpen: !!s.cols,
+colsStr: s.cols ? 'true' : 'false',
+toggleCols: () => this.setState({ cols: !s.cols }),
+menuOpen: !!s.menu,
+menuStr: s.menu ? 'true' : 'false',
+toggleMenu: () => this.setState({ menu: !s.menu }),
+onMove: (e) => {
+const r = e.currentTarget.getBoundingClientRect();
+const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+const ny = (((e.clientY - r.top) % window.innerHeight) / Math.max(window.innerHeight, 1)) * 2 - 1;
+if (Math.abs(nx - mx) > 0.04 || Math.abs(ny - my) > 0.04) this.setState({ mx: nx, my: ny });
+}
+};
+}
+}
+</script>
+</body>
+</html>
