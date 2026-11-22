@@ -14,6 +14,7 @@ import {
 import { runTestHook } from './src/server/testHooks';
 import { rateLimit } from './src/server/rateLimit';
 import { suggestGifts } from './src/server/giftGuide';
+import { lookupOrder, validateSupport, createSupportRequest, notifySupport } from './src/server/support';
 import { GIFT_GUIDE_MAX_INPUT } from './src/lib/giftGuide';
 import { priceCart, computeTotals, productIdsOf } from './src/server/quote';
 import { loadCoupon } from './src/server/couponService';
@@ -1992,6 +1993,34 @@ app.post('/api/gift-guide', limits.giftGuide, async (req: Request, res: Response
     return res.status(503).json(CATALOG_UNAVAILABLE);
   }
   return res.json(await suggestGifts(message, catalog));
+});
+
+/** Help & Support order tracking: order number AND checkout phone must match (404 otherwise). */
+app.post('/api/orders/lookup', limits.orderLookup, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const found = await lookupOrder(req.body?.orderNumber, req.body?.phone);
+    if (!found) return res.status(404).json({ error: 'We could not find an order with that number and phone.' });
+    return res.json(found);
+  } catch (e) {
+    console.error('Order lookup error:', e);
+    return res.status(503).json({ error: 'Order tracking is unavailable right now. Please try again shortly.' });
+  }
+});
+
+/** Call-back / damaged-item requests (optional photo already uploaded to support/{uuid}/). */
+app.post('/api/support', limits.support, async (req: Request, res: Response) => {
+  const v = validateSupport(req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  try {
+    const r = await createSupportRequest(v.value);
+    if ('error' in r) return res.status(r.status).json({ error: r.error });
+    void notifySupport(r.id, v.value);
+    return res.json({ ok: true, id: r.id });
+  } catch (e) {
+    console.error('Support request error:', e);
+    return res.status(503).json({ error: 'We could not send your request right now. Please try again shortly.' });
+  }
 });
 
 app.post('/api/newsletter', limits.newsletter, async (req: Request, res: Response) => {
