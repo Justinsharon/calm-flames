@@ -9,6 +9,7 @@ export default defineConfig({
       NODE_ENV: 'test',
       FIREBASE_PROJECT_ID: 'demo-calm-flames',
       FIREBASE_STORAGE_BUCKET: 'demo-calm-flames.appspot.com',
+      CHECKOUT_ENABLED: 'true',
     },
     fileParallelism: false,
     testTimeout: 20000,
