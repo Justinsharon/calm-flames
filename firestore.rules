@@ -114,6 +114,32 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Site content (journal, info pages, FAQ, contact, care). Visitors see published docs only.
+    function isValidPage(d, slug) {
+      return d.slug == slug
+        && d.type in ['journal', 'info', 'faq', 'contact', 'care']
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 160
+        && d.body is string && d.body.size() <= 50000
+        && d.published is bool
+        && optString(d, 'summary', 400)
+        && optString(d, 'eyebrow', 120)
+        && optString(d, 'heroImage', 1000)
+        && optString(d, 'category', 60)
+        && optNumber(d, 'readMinutes')
+        && optStringList(d, 'productIds', 24)
+        && (!('featured' in d) || d.featured is bool);
+    }
+    match /pages/{slug} {
+      allow read: if resource == null || resource.data.published == true || isAdmin();
+      allow create, update: if isAdmin() && isValidPage(request.resource.data, slug);
+      allow delete: if isAdmin();
+    }
+
+    // Newsletter sign-ups are written only by the server (firebase-admin); never by clients.
+    match /newsletterSubscribers/{id} {
+      allow read, write: if false;
+    }
+
     // Shop settings: public read (storefront needs shipping/COD), admin write.
     match /settings/{docId} {
       allow read: if docId == 'store';

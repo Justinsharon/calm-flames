@@ -50,6 +50,7 @@ import { ProductPhotosEditor } from './ProductPhotosEditor';
 import { ProductDetailsFields, detailsFormFromProduct, detailsUpdateFromForm, type DetailsForm } from './ProductDetailsFields';
 import { TaxonomyEditor } from './TaxonomyEditor';
 import { StoreSettingsEditor } from './StoreSettingsEditor';
+import { PagesEditor } from './PagesEditor';
 import { validateProductDetails } from '../../lib/adminValidation';
 import { Product, OrderRecord } from '../../types';
 
@@ -81,7 +82,7 @@ const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose }) => {
   const { user, profile, isAdmin } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'products' | 'inventory' | 'analytics' | 'reviews' | 'controls' | 'taxonomy' | 'storeSettings'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'products' | 'inventory' | 'analytics' | 'reviews' | 'controls' | 'taxonomy' | 'storeSettings' | 'pages'>('overview');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [inventory, setInventory] = useState<InventoryRecord[]>([]);
@@ -418,6 +419,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
             >
               <DollarSign className="w-4 h-4" />
               <span>Store Settings</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('pages')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'pages' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>Pages &amp; Journal</span>
             </button>
           </div>
 
@@ -1064,6 +1074,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
             {/* TAB: FEATURE CONTROLS / FLAGS */}
             {activeTab === 'taxonomy' && <TaxonomyEditor onMessage={(m) => setFeedback(m)} />}
             {activeTab === 'storeSettings' && <StoreSettingsEditor onMessage={(m) => setFeedback(m)} />}
+            {activeTab === 'pages' && <PagesEditor onMessage={(m) => setFeedback(m)} />}
 
             {activeTab === 'controls' && (
               <div className="space-y-6">
