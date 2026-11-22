@@ -29,7 +29,7 @@ export const SignInPanel: React.FC<{ onGuest: () => void; onSignedIn?: () => voi
   };
   return (
     <div className="glass" style={{ width: '100%', maxWidth: 520, padding: 'clamp(28px, 5vw, 48px)', display: 'flex', flexDirection: 'column', gap: 18, textAlign: 'center', alignItems: 'center' }}>
-      <span aria-hidden="true" style={{ display: 'inline-block', transform: 'scale(1.7)', margin: '14px 0 18px' }}>
+      <span aria-hidden="true" style={{ display: 'inline-block', transform: 'scale(1.7)', margin: '34px 0 22px' }}>
         <MatchAvatar size={44} />
       </span>
       <h1 id={titleId} className="serif" style={{ fontSize: 'clamp(2.2rem, 5vw, 48px)', fontWeight: 400, margin: 0, lineHeight: 1.05 }}>
