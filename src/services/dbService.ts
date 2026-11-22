@@ -27,17 +27,6 @@ export interface InventoryRecord {
   updatedAt: string;
 }
 
-export interface CouponRecord {
-  code: string;
-  type: 'percentage' | 'fixed';
-  value: number;
-  minimumOrderValue: number;
-  maximumDiscount?: number;
-  usageLimit: number;
-  usedCount: number;
-  isActive: boolean;
-}
-
 /**
  * Fetch inventory levels
  */
@@ -92,6 +81,10 @@ export async function fetchOrders(customerId?: string): Promise<OrderRecord[]> {
         customerId: data.customerId,
         date: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : data.date || 'Recent',
         items: data.items || [],
+        lines: Array.isArray(data.lines) ? data.lines : undefined,
+        giftMessage: data.giftMessage || null,
+        codFee: data.codFee || 0,
+        trackingUrl: data.trackingUrl || null,
         subtotal: data.subtotal || 0,
         discount: data.discount || 0,
         shipping: data.shipping || 0,
@@ -122,6 +115,10 @@ export async function fetchOrders(customerId?: string): Promise<OrderRecord[]> {
             customerId: data.customerId,
             date: data.createdAt ? new Date(data.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : data.date || 'Recent',
             items: data.items || [],
+            lines: Array.isArray(data.lines) ? data.lines : undefined,
+            giftMessage: data.giftMessage || null,
+            codFee: data.codFee || 0,
+            trackingUrl: data.trackingUrl || null,
             subtotal: data.subtotal || 0,
             discount: data.discount || 0,
             shipping: data.shipping || 0,
@@ -145,6 +142,17 @@ export async function fetchOrders(customerId?: string): Promise<OrderRecord[]> {
 /**
  * Update order status (Admin only)
  */
+/** Owner pastes the courier's tracking link (https only; empty clears it). */
+export async function updateOrderTracking(orderId: string, trackingUrl: string | null): Promise<void> {
+  const url = trackingUrl?.trim() || null;
+  if (url && !/^https:\/\/[^\s]+$/.test(url)) throw new Error('Tracking link must start with https://');
+  try {
+    await updateDoc(doc(db, 'orders', orderId), { trackingUrl: url, updatedAt: new Date().toISOString() });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
+  }
+}
+
 export async function updateOrderStatus(
   orderId: string,
   status: OrderRecord['status'],
@@ -163,48 +171,3 @@ export async function updateOrderStatus(
   }
 }
 
-/**
- * Validate and apply a coupon code
- */
-export async function validateCoupon(code: string, currentSubtotal: number): Promise<{ valid: boolean; discount: number; message: string }> {
-  try {
-    const codeClean = code.trim().toUpperCase();
-    const docRef = doc(db, 'coupons', codeClean);
-    const docSnap = await getDoc(docRef);
-
-    if (!docSnap.exists()) {
-      return { valid: false, discount: 0, message: 'Invalid coupon code.' };
-    }
-
-    const coupon = docSnap.data() as CouponRecord;
-    if (!coupon.isActive) {
-      return { valid: false, discount: 0, message: 'This coupon has expired.' };
-    }
-
-    if (currentSubtotal < coupon.minimumOrderValue) {
-      return {
-        valid: false,
-        discount: 0,
-        message: `Minimum order value for ${coupon.code} is ₹${coupon.minimumOrderValue}.`
-      };
-    }
-
-    let discount = 0;
-    if (coupon.type === 'percentage') {
-      discount = Math.round((currentSubtotal * coupon.value) / 100);
-      if (coupon.maximumDiscount && discount > coupon.maximumDiscount) {
-        discount = coupon.maximumDiscount;
-      }
-    } else {
-      discount = coupon.value;
-    }
-
-    return {
-      valid: true,
-      discount,
-      message: `Coupon ${coupon.code} applied successfully!`
-    };
-  } catch (e) {
-    return { valid: false, discount: 0, message: 'Could not validate coupon.' };
-  }
-}

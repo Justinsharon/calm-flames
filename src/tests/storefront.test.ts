@@ -50,7 +50,7 @@ describe('routing', () => {
   });
 
   it('unknown and out-of-phase paths are 404s; API paths are never the SPA', () => {
-    for (const p of ['/nope', '/products', '/collections/a/b', '/cart', '/checkout', '/build-a-box', '/account']) expect(matchRoute(p)).toBeNull();
+    for (const p of ['/nope', '/products', '/collections/a/b', '/account', '/order/TCF-1', '/order/TCF-123456']) expect(matchRoute(p)).toBeNull();
     expect(isApiPath('/api/cart/validate')).toBe(true);
     expect(isApiPath('/apiary')).toBe(false);
   });

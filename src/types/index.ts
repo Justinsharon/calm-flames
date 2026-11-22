@@ -190,6 +190,11 @@ export interface OrderRecord {
   status: OrderStatus;
   paymentStatus: PaymentStatus;
   fulfillmentStatus?: string;
+  /** Priced lines as stored by the server (products and gift boxes). */
+  lines?: { kind: 'product' | 'box'; productId?: string; productName?: string; boxSize?: number; contents?: { productName: string }[]; ribbon?: string; addOns?: { name: string }[]; message?: string; quantity: number; totalPrice: number }[];
+  giftMessage?: string | null;
+  codFee?: number;
+  trackingUrl?: string | null;
 }
 
 export interface QuizState {

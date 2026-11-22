@@ -20,7 +20,8 @@ export const ProductPage: React.FC = () => {
   const { slug = '' } = useParams();
   const { products, loading } = useCatalog();
   const { collections, scentFamilies } = useTaxonomy();
-  const { addToCart, setIsCartOpen } = useCart();
+  const { addToCart } = useCart();
+  const [added, setAdded] = useState(false);
   const { toggleWishlist, isInWishlist } = useWishlist();
   const { shipping, cod } = useStoreSettings();
   const { page: care } = usePage('candle-care');
@@ -164,13 +165,15 @@ export const ProductPage: React.FC = () => {
                 <QtyStepper value={qty} onChange={setQty} label={`Quantity of ${p.name}`} max={typeof p.availableStock === 'number' && p.availableStock > 0 ? Math.min(100, p.availableStock) : 100} />
                 <Button
                   style={{ flex: '1 1 200px' }}
-                  onClick={() => {
-                    addToCart(p, qty);
-                    setIsCartOpen(true);
-                  }}
+                  onClick={() => setAdded(addToCart(p, qty))}
                 >
                   Add to cart · {formatInr(p.price * qty)}
                 </Button>
+                {added && (
+                  <p role="status" style={{ margin: 0, flexBasis: '100%', color: 'var(--color-muted)' }}>
+                    Added to your cart · <Link to={paths.cart()} className="lnk">View cart</Link>
+                  </p>
+                )}
               </div>
             )}
             <div>

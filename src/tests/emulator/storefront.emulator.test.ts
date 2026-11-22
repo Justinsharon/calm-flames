@@ -77,6 +77,11 @@ describe('server meta for storefront URLs', () => {
     expect((await resolveMeta('/journal/slow-mornings')).title).toBe('Slow mornings · The Calm Flame');
     expect((await resolveMeta('/journal/draft-or-missing')).status).toBe(404);
     expect((await resolveMeta('/scent/oceanic')).status).toBe(404);
-    expect((await resolveMeta('/cart')).status).toBe(404);
+    expect((await resolveMeta('/cart')).status).toBe(200);
+    // Build a Box is hidden until the owner configures it in settings/store
+    expect((await resolveMeta('/build-a-box')).status).toBe(404);
+    await getAdminDb().collection('settings').doc('store').set({ buildABox: { sizes: [{ count: 3, price: 450 }], ribbons: [], addOns: [] } });
+    expect(await resolveMeta('/build-a-box')).toMatchObject({ status: 200, title: 'Build a Box · The Calm Flame' });
+    expect((await resolveMeta('/order/TCF-123456/confirmed')).title).toBe('Order confirmed · The Calm Flame');
   });
 });

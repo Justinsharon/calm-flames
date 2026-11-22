@@ -13,6 +13,12 @@ import {
   planReservationRelease
 } from './src/server/inventoryService';
 import { runTestHook } from './src/server/testHooks';
+import { priceCart, computeTotals, productIdsOf } from './src/server/quote';
+import { loadCoupon } from './src/server/couponService';
+import { newViewToken, hashViewToken, getOrderForViewer } from './src/server/orderView';
+import { sendOrderConfirmation } from './src/server/mailer';
+import { normalizeLines } from './src/lib/cartLines';
+import { validateCustomer, cleanCustomer } from './src/lib/checkoutForm';
 import { confirmOrderPaymentFromVerify, type VerifyTransitionOutcome } from './src/server/orderTransitions';
 import { expireStaleReservations, resolveMaxAgeMinutes } from './src/server/reservationExpiry';
 import { expireAbandonedOrders, resolveOrderMaxAgeMinutes } from './src/server/orderExpiry';
@@ -200,126 +206,43 @@ app.get('/api/checkout/readiness', async (_req: Request, res: Response) => {
 });
 
 /**
- * 1. Cart Validation Endpoint (Authoritative Prices & Line Items)
- * Rejects missing prices, non-positive prices, historical products, and invalid quantities.
+ * 1. Cart quote (authoritative prices, box contents, coupon, shipping, COD availability).
+ * `/api/cart/validate` is the older name for the same endpoint.
  */
-app.post('/api/cart/validate', async (req: Request, res: Response) => {
+async function quoteHandler(req: Request, res: Response) {
   try {
-    const { items, couponCode } = req.body;
-
+    const { items, couponCode, paymentMethod } = req.body || {};
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Cart is empty or invalid format.' });
     }
-
-    // Authoritative prices come from Firestore `products` (fail closed if unreadable)
     let catalog: Map<string, any>;
     try {
-      catalog = await getProductsByIds(items.map((i: any) => i?.productId));
+      catalog = await getProductsByIds(productIdsOf(items));
     } catch (catErr) {
-      console.error('Cart validation could not read the catalogue:', catErr);
+      console.error('Cart quote could not read the catalogue:', catErr);
       return res.status(503).json(CATALOG_UNAVAILABLE);
     }
-
-    let calculatedSubtotal = 0;
-    const validatedItems: any[] = [];
-
-    for (const item of items) {
-      // 1. Verify existence in the live catalogue
-      const serverProduct = typeof item?.productId === 'string' ? catalog.get(item.productId.trim()) : undefined;
-      if (!serverProduct) {
-        return res.status(400).json({ error: `Product ${item?.productId} not found.` });
-      }
-      if (serverProduct.isHistorical) {
-        return res.status(400).json({
-          error: `${serverProduct.name} is a historical product and is no longer available in the active catalogue.`
-        });
-      }
-
-      // 2. Reject inactive or historical items
-      if (serverProduct.isActive === false || serverProduct.isHistorical) {
-        return res.status(400).json({
-          error: `${serverProduct.name} is no longer available in the active catalogue.`
-        });
-      }
-
-      // 3. Strict Retail Price Validation - Never allow missing, zero, or unverified prices
-      if (!hasVerifiedPrice(serverProduct)) {
-        return res.status(400).json({
-          error: `${serverProduct.name} does not have a verified retail price and is currently unavailable for online purchase.`
-        });
-      }
-
-      // 4. Validate quantity (positive integer, 1 to 100)
-      if (
-        typeof item.quantity !== 'number' ||
-        !Number.isInteger(item.quantity) ||
-        item.quantity <= 0 ||
-        item.quantity > 100
-      ) {
-        return res.status(400).json({
-          error: `Invalid quantity for ${serverProduct.name}. Permitted range is 1 to 100.`
-        });
-      }
-
-      // 5. Strict Inventory Verification - Unknown inventory is never treated as in stock
-      if (
-        serverProduct.inStock !== true ||
-        serverProduct.inventoryStatus !== 'in_stock'
-      ) {
-        return res.status(400).json({
-          error: `${serverProduct.name} does not have verified available stock and cannot be purchased at this time.`
-        });
-      }
-
-      if (typeof serverProduct.availableStock === 'number' && serverProduct.availableStock < item.quantity) {
-        return res.status(400).json({
-          error: `Insufficient stock for ${serverProduct.name}. Requested ${item.quantity}, available: ${serverProduct.availableStock}.`
-        });
-      }
-
-      const verifiedUnitPrice = serverProduct.price;
-      const verifiedLineTotal = verifiedUnitPrice * item.quantity;
-      calculatedSubtotal += verifiedLineTotal;
-
-      validatedItems.push({
-        productId: item.productId,
-        productName: serverProduct.name,
-        quantity: item.quantity,
-        unitPrice: verifiedUnitPrice,
-        totalPrice: verifiedLineTotal,
-        priceStatus: serverProduct.priceStatus
-      });
-    }
-
-    let discount = 0;
-    if (couponCode) {
-      const codeClean = String(couponCode).trim().toUpperCase();
-      if (codeClean === 'CALM10' && calculatedSubtotal >= 500) {
-        discount = Math.min(500, Math.round(calculatedSubtotal * 0.10));
-      } else if (codeClean === 'FIRSTFLAME' && calculatedSubtotal >= 999) {
-        discount = 150;
-      }
-    }
-
-    const shippingCfg = getShippingConfig(await loadStoreSettings());
-    if (!shippingCfg) return res.status(503).json(SHIPPING_NOT_CONFIGURED);
-    const shipping = computeShipping(calculatedSubtotal, shippingCfg);
-    const finalTotal = Math.max(0, calculatedSubtotal - discount + shipping);
-
+    const settings = await loadStoreSettings();
+    const priced = priceCart(items, catalog, settings, { checkStock: true });
+    if (!priced.ok) return res.status(priced.status).json({ error: priced.error });
+    const coupon = await loadCoupon(couponCode);
+    const method = paymentMethod === 'cod' ? 'cod' : paymentMethod === 'razorpay' ? 'razorpay' : undefined;
+    const t = computeTotals(priced.subtotal, settings, coupon, method);
+    if (!t.ok) return res.status(t.status).json({ error: t.error });
     return res.json({
       valid: true,
-      items: validatedItems,
-      subtotal: calculatedSubtotal,
-      discount,
-      shipping,
-      total: finalTotal,
+      items: priced.lines,
+      ...t.totals,
       currency: 'INR',
+      checkoutEnabled: process.env.CHECKOUT_ENABLED === 'true'
     });
   } catch (err: any) {
-    console.error('Cart validation error:', err);
+    console.error('Cart quote error:', err);
     return res.status(500).json({ error: 'Server error during price validation.' });
   }
-});
+}
+app.post('/api/cart/quote', quoteHandler);
+app.post('/api/cart/validate', quoteHandler);
 
 /**
  * 2. Create Order & Razorpay Order (Strict Server-Calculated Totals, Live Inventory Reservation & Durable Idempotency)
@@ -329,10 +252,23 @@ app.post('/api/cart/validate', async (req: Request, res: Response) => {
  */
 app.post('/api/orders/create', async (req: Request, res: Response) => {
   try {
-    const { items, customer, paymentMethod, couponCode } = req.body;
+    // Phase 4 owner switch: no orders at all until checkout is opened.
+    if (process.env.CHECKOUT_ENABLED !== 'true') {
+      return res.status(503).json({ error: 'Checkout is not open yet.', checkoutEnabled: false });
+    }
+    const { items, customer: rawCustomer, paymentMethod, couponCode } = req.body || {};
+    const giftMessage = typeof req.body?.giftMessage === 'string' ? req.body.giftMessage.trim() : '';
 
-    if (!Array.isArray(items) || items.length === 0 || !customer) {
+    if (!Array.isArray(items) || items.length === 0 || !rawCustomer) {
       return res.status(400).json({ error: 'Missing required order payload.' });
+    }
+    const customerErrors = validateCustomer(rawCustomer);
+    if (Object.keys(customerErrors).length > 0) {
+      return res.status(400).json({ error: Object.values(customerErrors)[0], fields: customerErrors });
+    }
+    const customer = cleanCustomer(rawCustomer);
+    if (giftMessage.length > 300) {
+      return res.status(400).json({ error: 'Gift messages can be up to 300 characters.' });
     }
 
     // 1. Mandatory Unique Client Checkout-Attempt Idempotency Key (Fix C)
@@ -359,91 +295,38 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
     const idempDocId =
       'order_' + crypto.createHash('sha256').update(cleanIdempotencyKey).digest('hex');
 
-    // 2. Strict Retail Price and Quantity Validation against the live Firestore catalogue
+    // 2. Authoritative prices from the live Firestore catalogue (boxes re-validated and priced)
     let catalog: Map<string, any>;
     try {
-      catalog = await getProductsByIds(items.map((i: any) => i?.productId));
+      catalog = await getProductsByIds(productIdsOf(items));
     } catch (catErr) {
       console.error('Order creation could not read the catalogue:', catErr);
       return res.status(503).json(CATALOG_UNAVAILABLE);
     }
-    let subtotal = 0;
-    for (const item of items) {
-      if (!item || typeof item.productId !== 'string' || !item.productId.trim()) {
-        return res.status(400).json({ error: 'Invalid item format in order payload.' });
-      }
-      const prodId = item.productId.trim();
-      const prod = catalog.get(prodId);
-      // Historical products answer exactly like unknown ones (as with the old static catalogue)
-      if (!prod || prod.isHistorical) {
-        return res.status(400).json({
-          error: `Product ${prodId} is not available in the active catalogue.`
-        });
-      }
-      if (prod.isActive === false || prod.isHistorical) {
-        return res.status(400).json({
-          error: `${prod.name} is no longer available in the active catalogue.`
-        });
-      }
-
-      if (!hasVerifiedPrice(prod)) {
-        return res.status(400).json({
-          error: `${prod.name} does not have a verified retail price and cannot be ordered.`
-        });
-      }
-
-      if (
-        typeof item.quantity !== 'number' ||
-        !Number.isInteger(item.quantity) ||
-        item.quantity <= 0 ||
-        item.quantity > 100
-      ) {
-        return res.status(400).json({
-          error: `Invalid quantity for ${prod.name}. Permitted range is 1 to 100.`
-        });
-      }
-
-      subtotal += prod.price * item.quantity;
-    }
-
-    // 3. Calculate authoritative server totals and discounts
-    let discount = 0;
-    if (couponCode) {
-      const codeClean = String(couponCode).trim().toUpperCase();
-      if (codeClean === 'CALM10' && subtotal >= 500) discount = Math.min(500, Math.round(subtotal * 0.10));
-      if (codeClean === 'FIRSTFLAME' && subtotal >= 999) discount = 150;
-    }
-
+    const storeSettings = await loadStoreSettings();
+    const priced = priceCart(items, catalog, storeSettings, { checkStock: false });
+    if (!priced.ok) return res.status(priced.status).json({ error: priced.error });
     if (paymentMethod !== 'razorpay' && paymentMethod !== 'cod') {
       return res.status(400).json({ error: 'Unsupported payment method.' });
     }
-    const storeSettings = await loadStoreSettings();
-    const shippingCfg = getShippingConfig(storeSettings);
-    if (!shippingCfg) return res.status(503).json(SHIPPING_NOT_CONFIGURED);
-    const shipping = computeShipping(subtotal, shippingCfg);
-    let codFee = 0;
-    if (paymentMethod === 'cod') {
-      const cod = getCodConfig(storeSettings);
-      if (!cod) return res.status(400).json({ error: 'Cash on delivery is not available.' });
-      codFee = cod.codFee;
-      if (subtotal - discount + shipping + codFee > cod.codMaxOrder) {
-        return res.status(400).json({ error: `Cash on delivery is available for orders up to ₹${cod.codMaxOrder}.` });
-      }
-    }
-    const total = Math.max(0, subtotal - discount + shipping + codFee);
 
-    const normalizedItems = [...items]
-      .map((i: any) => ({ productId: String(i.productId).trim(), quantity: Number(i.quantity) }))
-      .sort((a, b) => a.productId.localeCompare(b.productId));
+    // 3. Coupon, shipping and COD from Firestore (coupons/, settings/store)
+    const coupon = await loadCoupon(couponCode);
+    const quoted = computeTotals(priced.subtotal, storeSettings, coupon, paymentMethod);
+    if (!quoted.ok) return res.status(quoted.status).json({ error: quoted.error });
+    const { subtotal, discount, shipping, codFee, total } = quoted.totals;
+    const appliedCoupon = quoted.totals.couponCode;
+    const pricedLines = priced.lines;
 
     const payloadFingerprint = crypto
       .createHash('sha256')
       .update(
         JSON.stringify({
-          items: normalizedItems,
-          email: String(customer.email).trim().toLowerCase(),
+          items: normalizeLines(items),
+          email: customer.email,
           paymentMethod: String(paymentMethod).trim().toLowerCase(),
-          couponCode: couponCode ? String(couponCode).trim().toUpperCase() : ''
+          couponCode: couponCode ? String(couponCode).trim().toUpperCase() : '',
+          giftMessage
         })
       )
       .digest('hex');
@@ -453,6 +336,8 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
     const idempDocRef = doc(db, 'orderIdempotency', idempDocId);
 
     const initialClaimToken = crypto.randomUUID();
+    // Unguessable token for the order-confirmed page; only its hash goes on the order.
+    const initialViewToken = newViewToken();
     const initialOrderNumber = `TCF-${Math.floor(100000 + Math.random() * 900000)}`;
     const initialReservationId = `res_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
@@ -544,6 +429,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
               reservationId: newResId,
               claimGeneration: nextGen,
               claimToken: initialClaimToken,
+              viewToken: initialViewToken,
               updatedAt: new Date().toISOString()
             });
 
@@ -552,7 +438,8 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
               orderNumber: newOrderNum,
               reservationId: newResId,
               claimGeneration: nextGen,
-              claimToken: initialClaimToken
+              claimToken: initialClaimToken,
+              viewToken: initialViewToken
             };
           }
         }
@@ -565,6 +452,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
           reservationId: initialReservationId,
           claimGeneration: 1,
           claimToken: initialClaimToken,
+          viewToken: initialViewToken,
           status: 'CREATING',
           payloadHash: payloadFingerprint,
           amount: total,
@@ -577,7 +465,8 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
           orderNumber: initialOrderNumber,
           reservationId: initialReservationId,
           claimGeneration: 1,
-          claimToken: initialClaimToken
+          claimToken: initialClaimToken,
+          viewToken: initialViewToken
         };
       });
     } catch (claimErr) {
@@ -613,9 +502,13 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
       try {
         const existingOrderRef = doc(db, 'orders', claimResult.orderNumber);
         const orderSnap = await getDoc(existingOrderRef);
+        const idempSnapForToken = await getDoc(idempDocRef);
         if (orderSnap.exists()) {
           const ord = orderSnap.data();
           return res.json({
+            viewToken: idempSnapForToken.exists() ? idempSnapForToken.data().viewToken || null : null,
+            razorpayKeyId: ord.razorpayOrderId ? process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID : undefined,
+            codFee: ord.codFee || 0,
             orderNumber: ord.orderNumber,
             razorpayOrderId: ord.razorpayOrderId,
             amount: ord.total,
@@ -637,6 +530,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
     const claimedReservationId = claimResult.reservationId;
     const workerClaimGeneration = claimResult.claimGeneration || 1;
     const workerClaimToken = claimResult.claimToken;
+    const orderViewToken: string = claimResult.viewToken;
 
     const orderDocRef = doc(db, 'orders', claimedOrderNumber);
 
@@ -697,7 +591,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
 
     // 5. Perform live atomic inventory reservation in Firestore with idempotency claim fence
     const reservationResult = await reserveInventoryTransaction(
-      items.map((i: any) => ({ productId: i.productId, quantity: i.quantity })),
+      priced.demand,
       claimedReservationId,
       claimedOrderNumber,
       {
@@ -765,6 +659,10 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
           currency: 'INR',
           paymentMethod,
           items: reservedItems,
+          lines: pricedLines,
+          couponCode: appliedCoupon || null,
+          giftMessage: giftMessage || null,
+          viewTokenHash: hashViewToken(orderViewToken),
           customer,
           reservationId: claimedReservationId,
           status: 'RESERVED',
@@ -996,14 +894,21 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
       });
     }
 
+    // Cash on delivery: the order is placed now (Razorpay orders confirm on payment).
+    if (paymentMethod === 'cod') void sendOrderConfirmation(claimedOrderNumber);
+
     return res.json({
       orderNumber: claimedOrderNumber,
+      viewToken: orderViewToken,
       razorpayOrderId,
+      // The key ID is public (Razorpay Checkout needs it in the browser); the secret never leaves.
+      razorpayKeyId: razorpayOrderId ? razorpayKeyId : undefined,
       amount: total,
       currency: 'INR',
       subtotal,
       discount,
       shipping,
+      codFee,
       paymentMethod
     });
   } catch (err: any) {
@@ -1224,6 +1129,7 @@ app.post('/api/payments/verify', async (req: Request, res: Response) => {
     if (outcome.kind === 'rejected') {
       return res.status(outcome.httpStatus).json({ verified: false, status: outcome.status, error: outcome.error });
     }
+    void sendOrderConfirmation(order_number);
     return res.json({
       verified: true,
       status: 'PAID',
@@ -2008,6 +1914,8 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
         throw transitionErr;
       }
 
+      if (transitionResult?.outcome === 'confirmed' && orderDocRef) void sendOrderConfirmation(orderDocRef.id);
+
       return res.status(200).json({
         status: 'success',
         eventId,
@@ -2040,6 +1948,22 @@ app.post('/api/webhooks/razorpay', async (req: Request, res: Response) => {
  * Newsletter ("Join the Ritual"). Stored server-side only (clients cannot read or write the
  * collection). Idempotent per email: re-subscribing changes nothing.
  */
+/**
+ * Order-confirmed page data. Needs the order's view token (header X-Order-Token), returned once by
+ * /api/orders/create. Unknown order and wrong token both answer 404.
+ */
+app.get('/api/orders/:orderNumber/view', async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const summary = await getOrderForViewer(req.params.orderNumber, req.headers['x-order-token']);
+    if (!summary) return res.status(404).json({ error: 'Order not found.' });
+    return res.json(summary);
+  } catch (e) {
+    console.error('Order view error:', e);
+    return res.status(503).json({ error: 'Could not load the order right now.' });
+  }
+});
+
 app.post('/api/newsletter', async (req: Request, res: Response) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
@@ -2506,7 +2430,12 @@ export function featureStatus(env: NodeJS.ProcessEnv = process.env): { feature: 
     {
       feature: 'Real checkout (CHECKOUT_ENABLED=true)',
       on: env.CHECKOUT_ENABLED === 'true',
-      whenOff: 'checkout readiness reports DISABLED'
+      whenOff: 'checkout readiness reports DISABLED and /api/orders/create refuses orders'
+    },
+    {
+      feature: 'Order emails (MAIL_PROVIDER=resend + RESEND_API_KEY + MAIL_FROM)',
+      on: env.MAIL_PROVIDER === 'resend' && Boolean(env.RESEND_API_KEY && env.MAIL_FROM),
+      whenOff: 'confirmation emails are logged and skipped'
     }
   ];
 }

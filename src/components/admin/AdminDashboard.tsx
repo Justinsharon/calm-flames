@@ -33,6 +33,7 @@ import {
   fetchInventory,
   fetchOrders,
   updateOrderStatus,
+  updateOrderTracking,
   InventoryRecord
 } from '../../services/dbService';
 import { reviewsService, ProductReview } from '../../services/reviewsService';
@@ -51,6 +52,7 @@ import { ProductDetailsFields, detailsFormFromProduct, detailsUpdateFromForm, ty
 import { TaxonomyEditor } from './TaxonomyEditor';
 import { StoreSettingsEditor } from './StoreSettingsEditor';
 import { PagesEditor } from './PagesEditor';
+import { CouponsEditor } from './CouponsEditor';
 import { validateProductDetails } from '../../lib/adminValidation';
 import { Product, OrderRecord } from '../../types';
 
@@ -82,7 +84,8 @@ const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose }) => {
   const { user, profile, isAdmin } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'products' | 'inventory' | 'analytics' | 'reviews' | 'controls' | 'taxonomy' | 'storeSettings' | 'pages'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'products' | 'inventory' | 'analytics' | 'reviews' | 'controls' | 'taxonomy' | 'storeSettings' | 'pages' | 'coupons'>('overview');
+  const [trackingDraft, setTrackingDraft] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [inventory, setInventory] = useState<InventoryRecord[]>([]);
@@ -279,7 +282,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
 
   const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderRecord['status']) => {
     try {
-      await updateOrderStatus(orderId, newStatus, newStatus === 'SHIPPED' ? 'In Transit via BlueDart' : undefined);
+      await updateOrderStatus(orderId, newStatus);
       setFeedback(`Order ${orderId} marked as ${newStatus}.`);
       loadAdminData();
       if (selectedOrder && selectedOrder.orderId === orderId) {
@@ -429,6 +432,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
               <MessageSquare className="w-4 h-4" />
               <span>Pages &amp; Journal</span>
             </button>
+            <button
+              onClick={() => setActiveTab('coupons')}
+              className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                activeTab === 'coupons' ? 'border-[#2A2521] text-[#1F1B18]' : 'border-transparent text-[#79716B]'
+              }`}
+            >
+              <DollarSign className="w-4 h-4" />
+              <span>Coupons</span>
+            </button>
           </div>
 
           {/* Status Toast */}
@@ -549,6 +561,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                               onChange={(e) => handleUpdateOrderStatus(ord.orderId, e.target.value as any)}
                               className="px-2 py-1 text-[11px] rounded-lg border border-[#DBC4A9] bg-[#FAF7F2] text-[#1F1B18]"
                             >
+                              {!['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'].includes(ord.status) && (
+                                <option value={ord.status} disabled>{ord.status}</option>
+                              )}
                               <option value="CONFIRMED">CONFIRMED</option>
                               <option value="PROCESSING">PROCESSING</option>
                               <option value="SHIPPED">SHIPPED</option>
@@ -558,7 +573,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                           </td>
                           <td className="py-3 px-4 text-right">
                             <button
-                              onClick={() => setSelectedOrder(ord)}
+                              onClick={() => {
+                                setSelectedOrder(ord);
+                                setTrackingDraft(ord.trackingUrl || '');
+                              }}
                               className="text-[11px] text-[#9E6D47] font-semibold hover:underline"
                             >
                               View Items
@@ -577,12 +595,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                       <h5 className="font-bold text-xs">Items in {selectedOrder.orderId}:</h5>
                       <button onClick={() => setSelectedOrder(null)} className="text-xs text-stone-500">Close</button>
                     </div>
-                    {selectedOrder.items.map((i, idx) => (
-                      <div key={idx} className="flex justify-between text-xs text-[#65412E]">
-                        <span>{i.quantity} &times; {i.product.name}</span>
-                        <span>₹{i.product.price * i.quantity}</span>
+                    <p className="text-[11px] text-[#79716B]">
+                      {selectedOrder.paymentMethod === 'cod' ? 'Cash on delivery' : 'Online'} · payment {selectedOrder.paymentStatus} · status {selectedOrder.status}
+                    </p>
+                    {(selectedOrder.lines || (selectedOrder.items as any[]).map((i: any) => ({ kind: 'product', productName: i.product?.name || i.productId, quantity: i.quantity, totalPrice: i.product ? i.product.price * i.quantity : undefined }))).map((l: any, idx: number) => (
+                      <div key={idx} className="flex justify-between gap-4 text-xs text-[#65412E]">
+                        <span>
+                          {l.quantity} &times; {l.kind === 'box' ? `Gift box of ${l.boxSize}` : l.productName || l.productId}
+                          {l.kind === 'box' && (
+                            <span className="block text-[10px] text-[#79716B]">
+                              {[(l.contents || []).map((c: any) => c.productName).join(', '), l.ribbon && `${l.ribbon} ribbon`, ...(l.addOns || []).map((a: any) => a.name)].filter(Boolean).join(' · ')}
+                              {l.message ? ` · note: “${l.message}”` : ''}
+                            </span>
+                          )}
+                        </span>
+                        {typeof l.totalPrice === 'number' && <span>₹{l.totalPrice}</span>}
                       </div>
                     ))}
+                    {selectedOrder.giftMessage && <p className="text-xs text-[#65412E]">Gift message: “{selectedOrder.giftMessage}”</p>}
+                    <p className="text-xs text-[#65412E]">
+                      Ship to {selectedOrder.customer.fullName}, {(selectedOrder.customer as any).addressLine1}, {selectedOrder.customer.city}, {selectedOrder.customer.state} {selectedOrder.customer.pincode} · {selectedOrder.customer.phone}
+                    </p>
+                    <form
+                      className="flex flex-wrap gap-2 items-end pt-2"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        try {
+                          await updateOrderTracking(selectedOrder.orderId, trackingDraft);
+                          setSelectedOrder({ ...selectedOrder, trackingUrl: trackingDraft.trim() || null });
+                          setFeedback(`Tracking link ${trackingDraft.trim() ? 'saved' : 'cleared'} for ${selectedOrder.orderId}.`);
+                          loadAdminData();
+                        } catch (err: any) {
+                          alert(err.message);
+                        }
+                      }}
+                    >
+                      <label className="flex-1 min-w-[220px]">
+                        <span className="block text-[11px] font-medium text-[#79716B] mb-1">Tracking URL (shown on the customer's order page)</span>
+                        <input
+                          type="url"
+                          value={trackingDraft}
+                          onChange={(e) => setTrackingDraft(e.target.value)}
+                          placeholder="https://…"
+                          className="w-full px-3 py-2 text-xs rounded-lg border border-[#DBC4A9] bg-white"
+                        />
+                      </label>
+                      <button type="submit" className="px-3 py-2 rounded-lg bg-[#2A2521] text-white text-xs font-bold">Save link</button>
+                    </form>
                   </div>
                 )}
               </div>
@@ -1075,6 +1134,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
             {activeTab === 'taxonomy' && <TaxonomyEditor onMessage={(m) => setFeedback(m)} />}
             {activeTab === 'storeSettings' && <StoreSettingsEditor onMessage={(m) => setFeedback(m)} />}
             {activeTab === 'pages' && <PagesEditor onMessage={(m) => setFeedback(m)} />}
+            {activeTab === 'coupons' && <CouponsEditor onMessage={(m) => setFeedback(m)} />}
 
             {activeTab === 'controls' && (
               <div className="space-y-6">

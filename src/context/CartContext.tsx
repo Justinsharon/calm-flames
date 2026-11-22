@@ -1,315 +1,297 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useCatalog } from './CatalogContext';
-import { useStoreSettings } from './StoreSettingsContext';
-import { computeShipping } from '../lib/storeSettings';
 import { hasVerifiedPrice } from '../lib/productMapping';
-import { Product, CartItem } from '../types';
+import type { Product } from '../types';
+import { type CartLineInput, type BoxLineInput, lineKey, MAX_BOX_QTY, MAX_LINE_QTY } from '../lib/cartLines';
 import { auth, db } from '../lib/firebase';
-import { doc, getDocs, collection, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { doc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
+
+/**
+ * The cart holds product lines and gift-box lines (one line = one box with its candles).
+ * Only ids and quantities are stored; what is shown comes from the LIVE catalogue, and every
+ * money figure comes from the server quote (/api/cart/quote). Nothing is priced here.
+ */
+export type CartLine =
+  | { key: string; kind: 'product'; input: CartLineInput; product: Product; quantity: number }
+  | { key: string; kind: 'box'; input: BoxLineInput; products: Product[]; quantity: number };
+
+/** Server quote (see src/server/quote.ts). */
+export interface CartQuote {
+  items: { kind: 'product' | 'box'; totalPrice: number; unitPrice: number }[];
+  subtotal: number;
+  discount: number;
+  couponCode: string;
+  couponMessage?: string;
+  shipping: number;
+  codFee: number;
+  total: number;
+  amountToFreeShipping: number;
+  freeShippingThreshold: number;
+  cod: { available: boolean; fee?: number; maxOrder?: number; reason?: string };
+  checkoutEnabled: boolean;
+}
 
 interface CartContextType {
-  cart: CartItem[];
-  addToCart: (product: Product, quantity?: number) => void;
-  removeFromCart: (productId: string) => void;
-  updateQuantity: (productId: string, quantity: number) => void;
+  lines: CartLine[];
+  /** Lines as sent to the server. */
+  inputs: CartLineInput[];
+  addToCart: (product: Product, quantity?: number) => boolean;
+  addBox: (box: Omit<BoxLineInput, 'kind' | 'quantity'>, quantity?: number) => void;
+  setQuantity: (key: string, quantity: number) => void;
+  removeLine: (key: string) => void;
   clearCart: () => void;
   totalItems: number;
-  subtotal: number;
-  shippingFee: number;
-  totalAmount: number;
-  discount: number;
-  appliedCoupon: string | null;
-  applyCouponCode: (code: string) => Promise<{ success: boolean; message: string }>;
-  removeCoupon: () => void;
-  /** Null until the owner sets shipping in settings/store (then free-shipping UI is hidden). */
-  freeShippingThreshold: number | null;
-  amountNeededForFreeShipping: number;
-  shippingConfigured: boolean;
-  isCartOpen: boolean;
-  setIsCartOpen: (open: boolean) => void;
-  isCheckoutOpen: boolean;
-  setIsCheckoutOpen: (open: boolean) => void;
-  validateCartWithServer: () => Promise<{ valid: boolean; error?: string; verifiedTotal?: number }>;
+  giftMessage: string;
+  setGiftMessage: (m: string) => void;
+  couponCode: string;
+  setCouponCode: (c: string) => void;
+  quote: CartQuote | null;
+  quoteError: string | null;
+  quoting: boolean;
+  /** Re-quote now (optionally for a payment method, which changes COD fee). */
+  requote: (paymentMethod?: 'razorpay' | 'cod') => Promise<CartQuote | null>;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
+const CART_STORAGE_KEY = 'the_calm_flame_cart_v2';
+const LEGACY_STORAGE_KEY = 'the_calm_flame_cart';
+const GIFT_KEY = 'the_calm_flame_gift_message';
 
-const CART_STORAGE_KEY = 'the_calm_flame_cart';
+function readStored(): CartLineInput[] {
+  try {
+    const raw = localStorage.getItem(CART_STORAGE_KEY);
+    if (raw) return sanitize(JSON.parse(raw));
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy) {
+      const old = JSON.parse(legacy);
+      return sanitize(Array.isArray(old) ? old.map((i: any) => ({ productId: i?.product?.id, quantity: i?.quantity })) : []);
+    }
+  } catch {
+    /* unavailable storage */
+  }
+  return [];
+}
+
+/** Keep only well-formed lines (storage can hold anything). */
+export function sanitize(raw: unknown): CartLineInput[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CartLineInput[] = [];
+  for (const l of raw as any[]) {
+    if (l?.kind === 'box') {
+      if (Number.isInteger(l.boxSize) && Array.isArray(l.productIds) && l.productIds.every((x: unknown) => typeof x === 'string') && Number.isInteger(l.quantity) && l.quantity > 0) {
+        out.push({ kind: 'box', boxSize: l.boxSize, productIds: l.productIds, ribbon: typeof l.ribbon === 'string' ? l.ribbon : undefined, addOns: Array.isArray(l.addOns) ? l.addOns.filter((a: unknown) => typeof a === 'string') : [], message: typeof l.message === 'string' ? l.message : undefined, quantity: Math.min(MAX_BOX_QTY, l.quantity) });
+      }
+    } else if (typeof l?.productId === 'string' && Number.isInteger(l.quantity) && l.quantity > 0) {
+      out.push({ productId: l.productId, quantity: Math.min(MAX_LINE_QTY, l.quantity) });
+    }
+  }
+  return out;
+}
+
+/** Short stable id for a Firestore cart doc. */
+function docIdFor(l: CartLineInput): string {
+  if (l.kind !== 'box') return l.productId;
+  let h = 5381;
+  for (const ch of lineKey(l)) h = ((h << 5) + h + ch.charCodeAt(0)) >>> 0;
+  return `box_${h.toString(36)}`;
+}
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [cart, setCart] = useState<CartItem[]>(() => {
+  const [inputs, setInputs] = useState<CartLineInput[]>(readStored);
+  const [giftMessage, setGiftMessageState] = useState<string>(() => {
     try {
-      const saved = localStorage.getItem(CART_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
+      return localStorage.getItem(GIFT_KEY) || '';
     } catch {
-      return [];
+      return '';
     }
   });
-
+  const [couponCode, setCouponCode] = useState('');
+  const [quote, setQuote] = useState<CartQuote | null>(null);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoting, setQuoting] = useState(false);
   const { getProductById, loading: catalogLoading, error: catalogError } = useCatalog();
-  const { shipping: shippingCfg } = useStoreSettings();
 
-  // Stored cart lines hold a product snapshot; always show the LIVE catalogue version (current
-  // price/photo). Once the catalogue has loaded, lines whose product is no longer active or no
-  // longer has a verified price are dropped from what the customer sees and pays for.
-  const resolvedCart = useMemo<CartItem[]>(() => {
-    if (catalogLoading || catalogError) return cart;
-    return cart
-      .map((item) => {
-        const live = getProductById(item.product.id);
-        return live ? { ...item, product: live } : null;
-      })
-      .filter((item): item is CartItem => item !== null && hasVerifiedPrice(item.product));
-  }, [cart, catalogLoading, catalogError, getProductById]);
-
-  const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
-  const [discount, setDiscount] = useState<number>(0);
-  const [isCartOpen, setIsCartOpen] = useState(false);
-  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-
-  // Sync to local storage
   useEffect(() => {
     try {
-      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
-    } catch (e) {
-      console.warn('Failed to save cart to localStorage', e);
+      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(inputs));
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch {
+      /* ignore */
     }
-  }, [cart]);
+  }, [inputs]);
 
-  // Sync with Firestore customer subcollection when auth user changes
+  const setGiftMessage = (m: string) => {
+    setGiftMessageState(m);
+    try {
+      localStorage.setItem(GIFT_KEY, m);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Signed-in customers: merge the saved cart once, then mirror changes (best effort).
+  const syncedUid = useRef<string | null>(null);
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        try {
-          const userCartRef = collection(db, 'customers', user.uid, 'cart');
-          const snap = await getDocs(userCartRef);
-
-          if (!snap.empty) {
-            const serverItems: CartItem[] = [];
-            snap.forEach((d) => {
-              const data = d.data();
-              if (data.product && data.quantity) {
-                serverItems.push({ product: data.product, quantity: data.quantity });
-              }
-            });
-
-            // Merge local and server items
-            setCart((prevLocal) => {
-              const merged = [...serverItems];
-              for (const locItem of prevLocal) {
-                const existing = merged.find((m) => m.product.id === locItem.product.id);
-                if (!existing) {
-                  merged.push(locItem);
-                  // Also write back to userCart
-                  setDoc(doc(db, 'customers', user.uid, 'cart', locItem.product.id), {
-                    product: locItem.product,
-                    quantity: locItem.quantity,
-                    updatedAt: new Date().toISOString()
-                  }).catch(() => {});
-                }
-              }
-              return merged;
-            });
-          } else if (cart.length > 0) {
-            // Upload current local cart to Firestore
-            const batch = writeBatch(db);
-            for (const item of cart) {
-              const itemRef = doc(db, 'customers', user.uid, 'cart', item.product.id);
-              batch.set(itemRef, {
-                product: item.product,
-                quantity: item.quantity,
-                updatedAt: new Date().toISOString()
-              });
-            }
-            batch.commit().catch(() => {});
-          }
-        } catch (e) {
-          console.warn('Could not sync customer cart with Firestore:', e);
-        }
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  const addToCart = (product: Product, quantity: number = 1) => {
-    // Strict safety check: Never permit unverified prices or inactive products to enter the cart
-    if (
-      !product ||
-      product.priceStatus === 'missing' ||
-      typeof product.price !== 'number' ||
-      !Number.isFinite(product.price) ||
-      product.price <= 0 ||
-      (product as any).isActive === false ||
-      (product as any).isHistorical
-    ) {
-      console.warn(`Product ${product?.name} cannot be added to bag: unverified price or not in active catalogue.`);
-      return;
-    }
-
-    const safeQty = Math.max(1, Math.min(100, Math.floor(quantity)));
-
-    setCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
-      let updated: CartItem[];
-      if (existing) {
-        updated = prev.map((item) =>
-          item.product.id === product.id ? { ...item, quantity: Math.min(100, item.quantity + safeQty) } : item
+    return auth.onAuthStateChanged(async (user) => {
+      syncedUid.current = null;
+      if (!user) return;
+      try {
+        const snap = await getDocs(collection(db, 'customers', user.uid, 'cart'));
+        const saved = sanitize(
+          snap.docs.map((d) => {
+            const x = d.data() as any;
+            return x.line ?? (x.product?.id ? { productId: x.product.id, quantity: x.quantity } : null);
+          })
         );
+        setInputs((local) => {
+          const merged = [...saved];
+          for (const l of local) if (!merged.some((m) => lineKey(m) === lineKey(l))) merged.push(l);
+          for (const l of merged) setDoc(doc(db, 'customers', user.uid, 'cart', docIdFor(l)), { line: l, updatedAt: new Date().toISOString() }).catch(() => {});
+          return merged;
+        });
+        syncedUid.current = user.uid;
+      } catch (e) {
+        console.warn('Could not sync the saved cart:', e);
+      }
+    });
+  }, []);
+  const mirror = (l: CartLineInput, removed = false) => {
+    const uid = syncedUid.current;
+    if (!uid) return;
+    const ref = doc(db, 'customers', uid, 'cart', docIdFor(l));
+    (removed ? deleteDoc(ref) : setDoc(ref, { line: l, updatedAt: new Date().toISOString() })).catch(() => {});
+  };
+
+  // Live view of the stored lines; lines whose products are gone or unpriced are not shown.
+  const lines = useMemo<CartLine[]>(() => {
+    if (catalogLoading || catalogError) return [];
+    const out: CartLine[] = [];
+    for (const l of inputs) {
+      if (l.kind === 'box') {
+        const products = l.productIds.map((id) => getProductById(id));
+        if (products.every((p): p is Product => Boolean(p) && hasVerifiedPrice(p!))) out.push({ key: lineKey(l), kind: 'box', input: l, products, quantity: l.quantity });
       } else {
-        updated = [...prev, { product, quantity: safeQty }];
+        const p = getProductById(l.productId);
+        if (p && hasVerifiedPrice(p)) out.push({ key: lineKey(l), kind: 'product', input: l, product: p, quantity: l.quantity });
       }
+    }
+    return out;
+  }, [inputs, catalogLoading, catalogError, getProductById]);
+  const liveInputs = useMemo(() => lines.map((l) => l.input), [lines]);
 
-      // Sync to Firestore if user logged in
-      if (auth.currentUser) {
-        const itemToSave = updated.find((i) => i.product.id === product.id);
-        if (itemToSave) {
-          setDoc(doc(db, 'customers', auth.currentUser.uid, 'cart', product.id), {
-            product: itemToSave.product,
-            quantity: itemToSave.quantity,
-            updatedAt: new Date().toISOString()
-          }).catch(() => {});
-        }
-      }
-
-      return updated;
+  const addToCart = (product: Product, quantity = 1): boolean => {
+    if (!product || !hasVerifiedPrice(product) || product.isActive === false || product.isHistorical) return false;
+    const n = Math.max(1, Math.min(MAX_LINE_QTY, Math.floor(quantity)));
+    setInputs((prev) => {
+      const i = prev.findIndex((l) => l.kind !== 'box' && l.productId === product.id);
+      const next = [...prev];
+      if (i >= 0) next[i] = { ...next[i], quantity: Math.min(MAX_LINE_QTY, next[i].quantity + n) };
+      else next.push({ productId: product.id, quantity: n });
+      mirror(next[i >= 0 ? i : next.length - 1]);
+      return next;
     });
-    setIsCartOpen(true);
+    return true;
   };
 
-  const removeFromCart = (productId: string) => {
-    setCart((prev) => prev.filter((item) => item.product.id !== productId));
-    if (auth.currentUser) {
-      deleteDoc(doc(db, 'customers', auth.currentUser.uid, 'cart', productId)).catch(() => {});
-    }
+  const addBox = (box: Omit<BoxLineInput, 'kind' | 'quantity'>, quantity = 1) => {
+    const line: BoxLineInput = { kind: 'box', ...box, message: box.message?.trim() || undefined, quantity: Math.max(1, Math.min(MAX_BOX_QTY, quantity)) };
+    setInputs((prev) => {
+      const i = prev.findIndex((l) => lineKey(l) === lineKey(line));
+      const next = [...prev];
+      if (i >= 0) next[i] = { ...next[i], quantity: Math.min(MAX_BOX_QTY, next[i].quantity + line.quantity) };
+      else next.push(line);
+      mirror(next[i >= 0 ? i : next.length - 1]);
+      return next;
+    });
   };
 
-  const updateQuantity = (productId: string, quantity: number) => {
-    if (quantity <= 0) {
-      removeFromCart(productId);
-      return;
-    }
-    setCart((prev) => {
-      const updated = prev.map((item) => (item.product.id === productId ? { ...item, quantity } : item));
-      if (auth.currentUser) {
-        const item = updated.find((i) => i.product.id === productId);
-        if (item) {
-          setDoc(doc(db, 'customers', auth.currentUser.uid, 'cart', productId), {
-            product: item.product,
-            quantity: item.quantity,
-            updatedAt: new Date().toISOString()
-          }).catch(() => {});
-        }
-      }
-      return updated;
+  const removeLine = (key: string) =>
+    setInputs((prev) => {
+      const l = prev.find((x) => lineKey(x) === key);
+      if (l) mirror(l, true);
+      return prev.filter((x) => lineKey(x) !== key);
     });
+
+  const setQuantity = (key: string, quantity: number) => {
+    if (quantity <= 0) return removeLine(key);
+    setInputs((prev) =>
+      prev.map((l) => {
+        if (lineKey(l) !== key) return l;
+        const next = { ...l, quantity: Math.min(l.kind === 'box' ? MAX_BOX_QTY : MAX_LINE_QTY, Math.floor(quantity)) };
+        mirror(next);
+        return next;
+      })
+    );
   };
 
   const clearCart = () => {
-    setCart([]);
-    setAppliedCoupon(null);
-    setDiscount(0);
+    for (const l of inputs) mirror(l, true);
+    setInputs([]);
+    setCouponCode('');
+    setGiftMessage('');
   };
 
-  const totalItems = resolvedCart.reduce((sum, item) => sum + item.quantity, 0);
-  const subtotal = resolvedCart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  // No shipping configured -> no shipping is quoted (the server refuses to price checkout).
-  const shippingFee = shippingCfg ? computeShipping(subtotal, shippingCfg) : 0;
-  const totalAmount = Math.max(0, subtotal - discount + shippingFee);
-  const amountNeededForFreeShipping = shippingCfg ? Math.max(0, shippingCfg.freeShippingThreshold - subtotal) : 0;
-
-  const applyCouponCode = async (code: string): Promise<{ success: boolean; message: string }> => {
-    const codeClean = code.trim().toUpperCase();
-    if (!codeClean) return { success: false, message: 'Please enter a coupon code.' };
-
-    try {
-      const res = await fetch('/api/cart/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: resolvedCart.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
-          couponCode: codeClean
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.discount > 0) {
-          setAppliedCoupon(codeClean);
-          setDiscount(data.discount);
-          return { success: true, message: `Coupon ${codeClean} applied! Saved ₹${data.discount}.` };
-        } else {
-          return { success: false, message: 'Coupon code not applicable or minimum order not reached.' };
+  const requote = useCallback(
+    async (paymentMethod?: 'razorpay' | 'cod'): Promise<CartQuote | null> => {
+      if (liveInputs.length === 0) {
+        setQuote(null);
+        setQuoteError(null);
+        return null;
+      }
+      setQuoting(true);
+      try {
+        const res = await fetch('/api/cart/quote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: liveInputs, couponCode: couponCode || undefined, paymentMethod })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setQuote(null);
+          setQuoteError(data.error || 'We could not price your cart right now.');
+          return null;
         }
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        return { success: false, message: errData.error || 'Invalid coupon code.' };
+        setQuote(data);
+        setQuoteError(null);
+        return data;
+      } catch {
+        setQuote(null);
+        setQuoteError('We could not reach the shop to price your cart. Please try again.');
+        return null;
+      } finally {
+        setQuoting(false);
       }
-    } catch {
-      // Offline fallback
-      if (codeClean === 'CALM10' && subtotal >= 500) {
-        const disc = Math.round(subtotal * 0.1);
-        setAppliedCoupon('CALM10');
-        setDiscount(disc);
-        return { success: true, message: `Coupon CALM10 applied! Saved ₹${disc}.` };
-      }
-      return { success: false, message: 'Invalid coupon code.' };
-    }
-  };
+    },
+    [liveInputs, couponCode]
+  );
 
-  const removeCoupon = () => {
-    setAppliedCoupon(null);
-    setDiscount(0);
-  };
+  // Re-quote whenever the lines or the coupon change (small debounce for the qty stepper).
+  useEffect(() => {
+    const t = setTimeout(() => void requote(), 250);
+    return () => clearTimeout(t);
+  }, [requote]);
 
-  const validateCartWithServer = async (): Promise<{ valid: boolean; error?: string; verifiedTotal?: number }> => {
-    try {
-      const res = await fetch('/api/cart/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: resolvedCart.map((i) => ({ productId: i.product.id, quantity: i.quantity })),
-          couponCode: appliedCoupon
-        })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        return { valid: false, error: errData.error || 'Cart validation failed.' };
-      }
-
-      const verifiedData = await res.json();
-      return { valid: true, verifiedTotal: verifiedData.total };
-    } catch (e: any) {
-      console.warn('Backend validate fallback:', e);
-      return { valid: true, verifiedTotal: totalAmount };
-    }
-  };
+  const totalItems = lines.reduce((s, l) => s + (l.kind === 'box' ? l.quantity : l.quantity), 0);
 
   return (
     <CartContext.Provider
       value={{
-        cart: resolvedCart,
+        lines,
+        inputs: liveInputs,
         addToCart,
-        removeFromCart,
-        updateQuantity,
+        addBox,
+        setQuantity,
+        removeLine,
         clearCart,
         totalItems,
-        subtotal,
-        shippingFee,
-        totalAmount,
-        discount,
-        appliedCoupon,
-        applyCouponCode,
-        removeCoupon,
-        freeShippingThreshold: shippingCfg ? shippingCfg.freeShippingThreshold : null,
-        shippingConfigured: Boolean(shippingCfg),
-        amountNeededForFreeShipping,
-        isCartOpen,
-        setIsCartOpen,
-        isCheckoutOpen,
-        setIsCheckoutOpen,
-        validateCartWithServer
+        giftMessage,
+        setGiftMessage,
+        couponCode,
+        setCouponCode,
+        quote,
+        quoteError,
+        quoting,
+        requote
       }}
     >
       {children}
@@ -319,8 +301,6 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useCart = () => {
   const context = useContext(CartContext);
-  if (!context) {
-    throw new Error('useCart must be used within a CartProvider');
-  }
+  if (!context) throw new Error('useCart must be used within a CartProvider');
   return context;
 };

@@ -7,6 +7,7 @@ import { useCatalog } from '../../context/CatalogContext';
 import { useTaxonomy } from '../../context/TaxonomyContext';
 import { inCollection, withProducts } from '../../lib/storefront';
 import { paths } from '../../lib/routes';
+import { useStoreSettings } from '../../context/StoreSettingsContext';
 import { PersonIcon, Wordmark } from './ui';
 
 /**
@@ -16,7 +17,8 @@ import { PersonIcon, Wordmark } from './ui';
  */
 export const Header: React.FC<{ variant: 'overlay' | 'solid' }> = ({ variant }) => {
   const [open, setOpen] = useState(false);
-  const { totalItems, setIsCartOpen } = useCart();
+  const { totalItems } = useCart();
+  const { buildABox } = useStoreSettings();
   const { user, profile, setIsAuthModalOpen, setIsAccountOpen } = useAuth();
   const { setIsWishlistOpen } = useWishlist();
   const { products } = useCatalog();
@@ -68,9 +70,9 @@ export const Header: React.FC<{ variant: 'overlay' | 'solid' }> = ({ variant }) 
         >
           {user ? <span className="avatar-initial">{initial}</span> : <PersonIcon />}
         </button>
-        <button type="button" className="nav-btn" aria-label={`Cart, ${totalItems} item${totalItems === 1 ? '' : 's'}`} onClick={() => setIsCartOpen(true)}>
+        <Link to={paths.cart()} className="nav-btn" aria-label={`Cart, ${totalItems} item${totalItems === 1 ? '' : 's'}`} style={{ textDecoration: 'none' }}>
           Cart ({totalItems})
-        </button>
+        </Link>
       </nav>
       {open && (
         <div ref={panelRef} id="site-menu" className="glass menu-panel" role="dialog" aria-label="Site menu">
@@ -86,6 +88,7 @@ export const Header: React.FC<{ variant: 'overlay' | 'solid' }> = ({ variant }) 
             <p className="eyebrow" style={{ marginBottom: 8 }}>Explore</p>
             <Link to={paths.scent()}>Shop by Scent</Link>
             <Link to={paths.gifting()}>Gifting</Link>
+            {buildABox && <Link to={paths.buildBox()}>Build a Box</Link>}
             <Link to={paths.journal()}>Journal</Link>
             <Link to={paths.info('our-story')}>Our Story</Link>
             <Link to={paths.support()}>Help &amp; Support</Link>

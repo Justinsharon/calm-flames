@@ -1,13 +1,27 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer, connectFirestoreEmulator, type Firestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-/* CRITICAL: The app will break without firestoreDatabaseId passed here */
-export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
+/**
+ * Local previews only: VITE_FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 at build/dev time points the
+ * storefront at the Firestore emulator (default database). Never set in production builds.
+ */
+const emulatorHost = (import.meta as any).env?.VITE_FIRESTORE_EMULATOR_HOST as string | undefined;
+function makeDb(): Firestore {
+  if (emulatorHost) {
+    const d = getFirestore(app);
+    const [h, p] = emulatorHost.split(':');
+    connectFirestoreEmulator(d, h, Number(p));
+    return d;
+  }
+  /* CRITICAL: The app will break without firestoreDatabaseId passed here */
+  return getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
+}
+export const db = makeDb();
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();

@@ -147,6 +147,9 @@ export const HomePage: React.FC = () => {
               <p style={{ margin: 0, color: 'var(--color-muted)' }}>
                 Boxes of {buildABox.sizes.map((s) => s.count).join(', ')} candles. Pick the ones you love; we wrap it.
               </p>
+              <div>
+                <ButtonLink to={paths.buildBox()}>Build your box</ButtonLink>
+              </div>
             </div>
           </div>
         </section>

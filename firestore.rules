@@ -12,6 +12,25 @@ service cloud.firestore {
 
     // Admin role lives ONLY on the user's Firestore document (customers/{uid}.role == 'admin'),
     // set with `npm run grant-admin -- <email>`. No hard-coded emails.
+    function isValidCoupon(code, d) {
+      return code.matches('^[A-Z0-9_-]{3,32}$')
+        && d.code == code
+        && d.type in ['percent', 'fixed']
+        && d.value is number && d.value > 0 && (d.type == 'fixed' || d.value <= 100)
+        && d.minOrder is number && d.minOrder >= 0
+        && d.active is bool
+        && (!('maxDiscount' in d) || (d.maxDiscount is number && d.maxDiscount > 0))
+        && (!('expiresAt' in d) || d.expiresAt is string);
+    }
+
+    // Admins change fulfilment fields only (status, tracking); money and items stay as priced.
+    function isValidOrderAdminUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'fulfillmentStatus', 'trackingUrl', 'adminNote', 'updatedAt'])
+        && (!('trackingUrl' in request.resource.data) || request.resource.data.trackingUrl == null
+            || (request.resource.data.trackingUrl is string && request.resource.data.trackingUrl.matches('^https://[^ ]+$')));
+    }
+
     function isAdmin() {
       return isSignedIn() &&
         get(/databases/$(database)/documents/customers/$(request.auth.uid)).data.get('role', 'customer') == 'admin';
@@ -152,9 +171,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Coupons are read only by the server (firebase-admin) so codes cannot be listed.
     match /coupons/{couponCode} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read: if isAdmin();
+      allow write: if isAdmin() && isValidCoupon(couponCode, request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /customers/{customerId} {
@@ -192,12 +213,9 @@ service cloud.firestore {
 
     match /orders/{orderId} {
       allow read: if (isSignedIn() && resource.data.customerId == request.auth.uid) || isAdmin();
-      allow create: if (
-        (isSignedIn() && request.resource.data.customerId == request.auth.uid) ||
-        (!isSignedIn() && request.resource.data.customerId is string) ||
-        isAdmin()
-      );
-      allow update: if isAdmin();
+      // Orders are created only by the server (/api/orders/create prices and reserves them).
+      allow create: if false;
+      allow update: if isAdmin() && isValidOrderAdminUpdate();
       allow delete: if isAdmin();
     }
 

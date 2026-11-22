@@ -57,7 +57,14 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
   (`src/lib/routes.ts`, react-router; server serves index.html with per-URL title/meta, 404s unknown paths).
   Home, Collection, Product, Scent, Gifting, Journal, Info, Support, 404. Content (journal, info pages, FAQ,
   contact, care) lives in Firestore `pages` (Admin → Pages & Journal; only published docs are public).
-  Cart, Build a Box, Checkout, Confirmed, Sign in, Account are 4C/4D (old drawers still used meanwhile).
+  Sign in, Account are 4D (old drawers still used meanwhile).
+- **Phase 4C — Cart, box, checkout (on `phase-4c-cart-box-checkout`):** `/cart`, `/build-a-box` (hidden until
+  `settings/store.buildABox`), `/checkout` ('Opening soon' unless `CHECKOUT_ENABLED=true` and readiness passes),
+  `/order/:id/confirmed` (needs the view token from order creation). One server quote (`src/server/quote.ts`)
+  prices products and boxes; coupons in Firestore `coupons/` (admin-only, `npm run migrate:coupons` adds the old
+  two INACTIVE); `/api/orders/create` refuses orders unless `CHECKOUT_ENABLED=true`. Confirmation email:
+  `MAIL_PROVIDER=resend` + `RESEND_API_KEY` + `MAIL_FROM` (unset = log and skip). Local previews can point the
+  storefront at the emulator with `VITE_FIRESTORE_EMULATOR_HOST`.
 - **Phase 4 — Go live:** owner enters prices/photos/settings in Firebase; owner sets Razorpay env vars +
   webhook; test payment; enable checkout; deploy to Cloud Run; point thecalmflames.com.
 - **Later:** UI polish.
