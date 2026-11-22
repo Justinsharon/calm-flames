@@ -4,7 +4,8 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
-import { getActiveCatalog, getProductsByIds } from './src/server/catalogService';
+import { getActiveCatalog, getProductsByIds, getStoreSettings } from './src/server/catalogService';
+import { getShippingConfig, getCodConfig, computeShipping, type StoreSettings } from './src/lib/storeSettings';
 import { hasVerifiedPrice } from './src/lib/productMapping';
 import {
   reserveInventoryTransaction,
@@ -104,8 +105,18 @@ async function recordOrphanMapping(
   }
 }
 
-const FREE_SHIPPING_THRESHOLD = 1500;
-const STANDARD_SHIPPING_FEE = 99;
+// Shipping and COD come from Firestore settings/store (owner-entered). Unset = not available.
+const SHIPPING_NOT_CONFIGURED = {
+  error: 'Shipping is not configured yet, so totals cannot be calculated. Checkout is unavailable.'
+};
+async function loadStoreSettings(): Promise<StoreSettings | null> {
+  try {
+    return await getStoreSettings();
+  } catch (e) {
+    console.error('Could not read settings/store:', e);
+    return null;
+  }
+}
 
 /**
  * Global Checkout Readiness Gate
@@ -153,10 +164,12 @@ app.get('/api/checkout/readiness', async (_req: Request, res: Response) => {
   // Explicit owner switch (Phase 4). Prices are now editable live in Firebase, so a fully priced
   // catalogue alone must never turn real checkout on.
   const checkoutSwitchOn = process.env.CHECKOUT_ENABLED === 'true';
+  const storeSettingsConfigured = Boolean(getShippingConfig(await loadStoreSettings()));
 
   // Real checkout must remain disabled unless every condition is satisfied
   const isCheckoutEnabled =
     checkoutSwitchOn &&
+    storeSettingsConfigured &&
     databaseAvailable &&
     inventoryConfigured &&
     hasPaymentCredentials &&
@@ -176,6 +189,7 @@ app.get('/api/checkout/readiness', async (_req: Request, res: Response) => {
       paymentCredentialsConfigured: hasPaymentCredentials,
       webhookSecretConfigured: hasWebhookSecret,
       checkoutSwitchOn,
+      storeSettingsConfigured,
     },
     message: isCheckoutEnabled
       ? 'All production checkout gates verified.'
@@ -285,7 +299,9 @@ app.post('/api/cart/validate', async (req: Request, res: Response) => {
       }
     }
 
-    const shipping = calculatedSubtotal >= FREE_SHIPPING_THRESHOLD ? 0 : STANDARD_SHIPPING_FEE;
+    const shippingCfg = getShippingConfig(await loadStoreSettings());
+    if (!shippingCfg) return res.status(503).json(SHIPPING_NOT_CONFIGURED);
+    const shipping = computeShipping(calculatedSubtotal, shippingCfg);
     const finalTotal = Math.max(0, calculatedSubtotal - discount + shipping);
 
     return res.json({
@@ -396,8 +412,23 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
       if (codeClean === 'FIRSTFLAME' && subtotal >= 999) discount = 150;
     }
 
-    const shipping = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : STANDARD_SHIPPING_FEE;
-    const total = Math.max(0, subtotal - discount + shipping);
+    if (paymentMethod !== 'razorpay' && paymentMethod !== 'cod') {
+      return res.status(400).json({ error: 'Unsupported payment method.' });
+    }
+    const storeSettings = await loadStoreSettings();
+    const shippingCfg = getShippingConfig(storeSettings);
+    if (!shippingCfg) return res.status(503).json(SHIPPING_NOT_CONFIGURED);
+    const shipping = computeShipping(subtotal, shippingCfg);
+    let codFee = 0;
+    if (paymentMethod === 'cod') {
+      const cod = getCodConfig(storeSettings);
+      if (!cod) return res.status(400).json({ error: 'Cash on delivery is not available.' });
+      codFee = cod.codFee;
+      if (subtotal - discount + shipping + codFee > cod.codMaxOrder) {
+        return res.status(400).json({ error: `Cash on delivery is available for orders up to ₹${cod.codMaxOrder}.` });
+      }
+    }
+    const total = Math.max(0, subtotal - discount + shipping + codFee);
 
     const normalizedItems = [...items]
       .map((i: any) => ({ productId: String(i.productId).trim(), quantity: Number(i.quantity) }))
@@ -726,6 +757,7 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
           subtotal,
           discount,
           shipping,
+          codFee,
           total,
           expectedAmountPaise: Math.round(total * 100),
           currency: 'INR',
@@ -2270,6 +2302,10 @@ app.post('/api/ai/assistant', async (req: Request, res: Response) => {
           .map(([id, p]: [string, any]) => `${id}: "${p.name}" (priceStatus: ${p.priceStatus}, scentFamily: ${p.scentFamily || 'Not specified'}, burnTime: ${p.burnTime || 'Not specified'}, fragrance: ${p.fragrance || 'Not specified'})`)
           .join('\n');
 
+        const shipCfg = getShippingConfig(await loadStoreSettings());
+        const shippingLine = shipCfg
+          ? `- Free shipping on orders above ₹${shipCfg.freeShippingThreshold} across India (₹${shipCfg.shippingFee} below that).`
+          : '- Shipping charges are confirmed at checkout; do not quote a shipping price or free-shipping threshold.';
         const systemPrompt = `You are the thoughtful concierge for "The Calm Flame", an artisanal candle brand rooted in India's botanical heritage.
 You provide warm, calm, helpful guidance about our products, scent notes, rituals, gifting, and candle care.
 
@@ -2277,7 +2313,7 @@ Catalog Products:
 ${catalogSummary}
 
 Brand Standards:
-- Free shipping on orders above ₹1,500 across India.
+${shippingLine}
 - Handcrafted artisanal candles and botanical creations.
 - Never invent product facts, fake prices, unverified burn times, or unreleased candles.
 - If a product price or specification is not specified in the catalogue, state that it is not specified or available upon enquiry.

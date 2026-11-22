@@ -3,6 +3,7 @@ import { ShoppingBag, Heart, Sparkles, Menu, X, User as UserIcon, ShieldCheck } 
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
 import { useAuth } from '../../context/AuthContext';
+import { useStoreSettings } from '../../context/StoreSettingsContext';
 
 interface NavbarProps {
   onOpenDiscovery: () => void;
@@ -22,6 +23,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenModalPage
 }) => {
   const { totalItems, setIsCartOpen } = useCart();
+  const { shipping } = useStoreSettings();
   const { wishlist, setIsWishlistOpen } = useWishlist();
   const { user, profile, isAdmin, setIsAuthModalOpen, setIsAccountOpen } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -43,7 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       {!bannerDismissed && (
         <div className="bg-[#2A2521] text-[#FAF7F2] text-[11px] md:text-xs py-2 px-4 flex items-center justify-between tracking-wide">
           <div className="flex-1 text-center font-normal overflow-x-auto whitespace-nowrap py-0.5">
-            <span>✦ Free shipping on orders above ₹1,500 ✦ Handcrafted with intention in India ✦ 100% Natural Soy Wax ✦ Cruelty-Free &amp; Vegan ✦</span>
+            <span>✦ {shipping ? `Free shipping on orders above ₹${shipping.freeShippingThreshold.toLocaleString('en-IN')} ✦ ` : ''}Handcrafted with intention in India ✦ 100% Natural Soy Wax ✦ Cruelty-Free &amp; Vegan ✦</span>
           </div>
           <button
             onClick={() => setBannerDismissed(true)}

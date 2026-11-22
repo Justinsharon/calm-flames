@@ -19,7 +19,15 @@ export const realFetch: typeof fetch = globalThis.fetch.bind(globalThis);
  * Order creation and reservation read prices from Firestore `products`.
  */
 export const TEST_PRICE = 500;
+
+/** Test fixture shipping settings in the EMULATOR (real values are entered by the owner). */
+export const TEST_SHIPPING = { freeShippingThreshold: 1500, shippingFee: 99 };
+export async function seedStoreSettings(settings: Record<string, any> = TEST_SHIPPING) {
+  await getAdminDb().collection('settings').doc('store').set(settings);
+}
+
 export async function seedPricedProduct(price = TEST_PRICE) {
+  await seedStoreSettings();
   await getAdminDb().collection('products').doc(PRODUCT).set({
     id: PRODUCT,
     slug: PRODUCT,

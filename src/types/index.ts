@@ -116,6 +116,20 @@ export interface Product {
   moods: MoodKey[];
   matchReasons?: Record<string, string>;
   sortOrder?: number;
+  // ---- Phase 4a (optional; see src/lib/productMapping.ts) ----
+  collection?: import('../lib/taxonomy').CollectionSlug;
+  scentFamilySlug?: import('../lib/taxonomy').ScentFamilySlug;
+  notes?: { top?: string[]; heart?: string[]; base?: string[] };
+  burnTimeHours?: number;
+  weightGrams?: number;
+  sizeCm?: string;
+  ingredients?: string;
+  description?: string;
+  /** All photos in order ([0] main, [1] hover). */
+  images?: string[];
+  occasions?: import('../lib/taxonomy').OccasionSlug[];
+  boxEligible?: boolean;
+  mrp?: number;
 }
 
 export interface BrandCategoryItem {

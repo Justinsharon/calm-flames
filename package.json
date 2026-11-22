@@ -15,7 +15,8 @@
     "migrate:catalog": "tsx scripts/migrate-catalog.ts",
     "grant-admin": "tsx scripts/grant-admin.ts",
     "expire-reservations": "tsx scripts/expire-reservations.ts",
-    "build:server": "esbuild server.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist-server/server.js --log-level=warning"
+    "build:server": "esbuild server.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist-server/server.js --log-level=warning",
+    "seed:taxonomy": "tsx scripts/seed-taxonomy.ts"
   },
   "dependencies": {
     "@google/genai": "^2.27.0",
