@@ -12,7 +12,8 @@ import { HeartIcon, MatchAvatar } from './ui';
  * (always visible on mobile). Unpriced or out-of-stock products never show Add to cart.
  */
 export const ProductCard: React.FC<{ product: Product; familyName?: string }> = ({ product: p, familyName }) => {
-  const { addToCart, setIsCartOpen } = useCart();
+  const { addToCart } = useCart();
+  const [added, setAdded] = React.useState(false);
   const { toggleWishlist, isInWishlist } = useWishlist();
   const saved = isInWishlist(p.id);
   const badge = productBadge(p);
@@ -55,11 +56,13 @@ export const ProductCard: React.FC<{ product: Product; familyName?: string }> = 
           type="button"
           className="btn btn-pri card-add"
           onClick={() => {
-            addToCart(p, 1);
-            setIsCartOpen(true);
+            if (addToCart(p, 1)) {
+              setAdded(true);
+              setTimeout(() => setAdded(false), 1800);
+            }
           }}
         >
-          Add to cart
+          <span aria-live="polite">{added ? 'Added to cart ✓' : 'Add to cart'}</span>
         </button>
       )}
     </div>

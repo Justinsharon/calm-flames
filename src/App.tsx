@@ -18,6 +18,10 @@ import { ArticlePage, JournalPage } from './storefront/pages/JournalPages';
 import { InfoPage } from './storefront/pages/InfoPage';
 import { SupportPage } from './storefront/pages/SupportPage';
 import { NotFoundPage } from './storefront/pages/NotFoundPage';
+import { CartPage } from './storefront/pages/CartPage';
+import { BuildBoxPage } from './storefront/pages/BuildBoxPage';
+import { CheckoutPage } from './storefront/pages/CheckoutPage';
+import { ConfirmedPage } from './storefront/pages/ConfirmedPage';
 
 /** Route table mirrors src/lib/routes.ts (also used by the server for titles and 404s). */
 export function StorefrontRoutes() {
@@ -37,6 +41,10 @@ export function StorefrontRoutes() {
           <Route key={s} path={s} element={<InfoPage />} />
         ))}
         <Route path="support" element={<SupportPage />} />
+        <Route path="cart" element={<CartPage />} />
+        <Route path="build-a-box" element={<BuildBoxPage />} />
+        <Route path="checkout" element={<CheckoutPage />} />
+        <Route path="order/:id/confirmed" element={<ConfirmedPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

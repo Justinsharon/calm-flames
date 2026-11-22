@@ -27,17 +27,6 @@ export interface InventoryRecord {
   updatedAt: string;
 }
 
-export interface CouponRecord {
-  code: string;
-  type: 'percentage' | 'fixed';
-  value: number;
-  minimumOrderValue: number;
-  maximumDiscount?: number;
-  usageLimit: number;
-  usedCount: number;
-  isActive: boolean;
-}
-
 /**
  * Fetch inventory levels
  */
@@ -163,48 +152,3 @@ export async function updateOrderStatus(
   }
 }
 
-/**
- * Validate and apply a coupon code
- */
-export async function validateCoupon(code: string, currentSubtotal: number): Promise<{ valid: boolean; discount: number; message: string }> {
-  try {
-    const codeClean = code.trim().toUpperCase();
-    const docRef = doc(db, 'coupons', codeClean);
-    const docSnap = await getDoc(docRef);
-
-    if (!docSnap.exists()) {
-      return { valid: false, discount: 0, message: 'Invalid coupon code.' };
-    }
-
-    const coupon = docSnap.data() as CouponRecord;
-    if (!coupon.isActive) {
-      return { valid: false, discount: 0, message: 'This coupon has expired.' };
-    }
-
-    if (currentSubtotal < coupon.minimumOrderValue) {
-      return {
-        valid: false,
-        discount: 0,
-        message: `Minimum order value for ${coupon.code} is ₹${coupon.minimumOrderValue}.`
-      };
-    }
-
-    let discount = 0;
-    if (coupon.type === 'percentage') {
-      discount = Math.round((currentSubtotal * coupon.value) / 100);
-      if (coupon.maximumDiscount && discount > coupon.maximumDiscount) {
-        discount = coupon.maximumDiscount;
-      }
-    } else {
-      discount = coupon.value;
-    }
-
-    return {
-      valid: true,
-      discount,
-      message: `Coupon ${coupon.code} applied successfully!`
-    };
-  } catch (e) {
-    return { valid: false, discount: 0, message: 'Could not validate coupon.' };
-  }
-}

@@ -507,6 +507,8 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
           const ord = orderSnap.data();
           return res.json({
             viewToken: idempSnapForToken.exists() ? idempSnapForToken.data().viewToken || null : null,
+            razorpayKeyId: ord.razorpayOrderId ? process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID : undefined,
+            codFee: ord.codFee || 0,
             orderNumber: ord.orderNumber,
             razorpayOrderId: ord.razorpayOrderId,
             amount: ord.total,
@@ -899,6 +901,8 @@ app.post('/api/orders/create', async (req: Request, res: Response) => {
       orderNumber: claimedOrderNumber,
       viewToken: orderViewToken,
       razorpayOrderId,
+      // The key ID is public (Razorpay Checkout needs it in the browser); the secret never leaves.
+      razorpayKeyId: razorpayOrderId ? razorpayKeyId : undefined,
       amount: total,
       currency: 'INR',
       subtotal,

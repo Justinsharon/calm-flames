@@ -27,7 +27,11 @@ export type RouteName =
   | 'journal'
   | 'article'
   | 'info'
-  | 'support';
+  | 'support'
+  | 'cart'
+  | 'buildBox'
+  | 'checkout'
+  | 'orderConfirmed';
 
 /** Order matters only for readability: patterns do not overlap. */
 export const ROUTES: { name: RouteName; path: string }[] = [
@@ -41,7 +45,11 @@ export const ROUTES: { name: RouteName; path: string }[] = [
   { name: 'journal', path: '/journal' },
   { name: 'article', path: '/journal/:slug' },
   ...INFO_PAGE_SLUGS.map((s) => ({ name: 'info' as const, path: `/${s}` })),
-  { name: 'support', path: '/support' }
+  { name: 'support', path: '/support' },
+  { name: 'cart', path: '/cart' },
+  { name: 'buildBox', path: '/build-a-box' },
+  { name: 'checkout', path: '/checkout' },
+  { name: 'orderConfirmed', path: '/order/:id/confirmed' }
 ];
 
 export interface RouteMatch {
@@ -85,7 +93,13 @@ export const paths = {
   gifting: (occasion?: string) => (occasion ? `/gifting/${encodeURIComponent(occasion)}` : '/gifting'),
   journal: (slug?: string) => (slug ? `/journal/${encodeURIComponent(slug)}` : '/journal'),
   info: (slug: InfoPageSlug) => `/${slug}`,
-  support: () => '/support'
+  support: () => '/support',
+  cart: () => '/cart',
+  buildBox: () => '/build-a-box',
+  checkout: () => '/checkout',
+  /** The view token goes in the #fragment: never sent to the server in the URL or logged. */
+  orderConfirmed: (orderNumber: string, token?: string) =>
+    `/order/${encodeURIComponent(orderNumber)}/confirmed${token ? `#t=${encodeURIComponent(token)}` : ''}`
 };
 
 export const SITE_NAME = 'The Calm Flame';

@@ -95,6 +95,20 @@ export async function resolveMeta(pathname: string): Promise<PageMeta> {
       }
       case 'support':
         return base('Help & Support');
+      case 'cart':
+        return base('Your cart');
+      case 'checkout':
+        return base('Checkout');
+      case 'orderConfirmed':
+        // Never reveal anything about the order in the HTML (the page loads it with its token).
+        return base('Order confirmed');
+      case 'buildBox': {
+        // Hidden until the owner configures it in settings/store.
+        const snap = await getAdminDb().collection('settings').doc('store').get();
+        const { getBuildABoxConfig, parseStoreSettings } = await import('../lib/storeSettings');
+        if (!getBuildABoxConfig(parseStoreSettings(snap.exists ? snap.data() : {}))) return notFound;
+        return base('Build a Box', 'Choose a box, fill it with the candles you love, and we wrap it by hand with a handwritten note.');
+      }
     }
   } catch {
     // Firestore unreachable: serve the page with default tags rather than failing.

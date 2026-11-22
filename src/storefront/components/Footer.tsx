@@ -1,9 +1,12 @@
 import React from 'react';
 import { Link } from 'react-router';
 import { paths } from '../../lib/routes';
+import { useStoreSettings } from '../../context/StoreSettingsContext';
 import { Wordmark } from './ui';
 
-export const Footer: React.FC = () => (
+export const Footer: React.FC = () => {
+  const { buildABox } = useStoreSettings();
+  return (
   <footer className="site-footer">
     <div className="wrap" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 40, paddingTop: 72, paddingBottom: 48 }}>
       <div>
@@ -14,6 +17,7 @@ export const Footer: React.FC = () => (
         <p className="eyebrow">Shop</p>
         <Link to={paths.scent()}>Shop by Scent</Link>
         <Link to={paths.gifting()}>Gifting</Link>
+        {buildABox && <Link to={paths.buildBox()}>Build a Box</Link>}
         <Link to={paths.journal()}>Journal</Link>
       </nav>
       <nav aria-label="Help">
@@ -35,3 +39,4 @@ export const Footer: React.FC = () => (
     </div>
   </footer>
 );
+};
