@@ -7,7 +7,7 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
 ## Hard rules
 - **Never hard-code prices or product images.** Firestore `products` is the single source of truth.
   The storefront reads it, the server prices checkout from it, the admin dashboard edits it.
-- **Never invent retail prices.** The owner enters them in Firebase. Unpriced products (`price: 0`,
+- **Never invent retail prices** (or shipping/COD/box prices in `settings/store`). The owner enters them in Firebase. Unpriced products (`price: 0`,
   `priceStatus: 'missing'`) must not be purchasable.
 - **Checkout stays disabled** (`/api/checkout/readiness` → `checkoutEnabled: false`) until Phase 4.
 - **No secrets in code or git.** Razorpay, Gemini and service-account credentials come from env vars only.
@@ -46,15 +46,27 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
 - **Phase 3 — Live catalogue:** storefront + server read products from Firestore; images in Firebase Storage
   (URL stored on product doc); admin dashboard can edit price/stock/photo; one-time migration script
   `scripts/migrate-catalog.ts`; remove seeding from `App.tsx`; admin role from Firestore.
-- **Phase 4 — Go live:** owner enters prices/photos in Firebase; owner sets Razorpay env vars + webhook;
-  test payment; enable checkout; deploy to Cloud Run; point thecalmflames.com.
+- **Phase 3b/3c (done):** fenced payment verify, stale-reservation sweeper, abandoned-payment expiry.
+- **Phase 4a — Hosting + data model (done on `phase-4a-hosting-data`):** Dockerfile + Cloud Run staging
+  (`docs/deploy.md`, service `calm-flames-staging`, asia-south1, secrets from Secret Manager, all optional);
+  product fields v2 (collection, scentFamily slug, notes, burnTimeHours, weightGrams, sizeCm, ingredients,
+  description, images[], tags, occasions, boxEligible, mrp); taxonomy docs `collections/`, `scentFamilies/`,
+  `occasions/`; `settings/store` (no defaults: unset = feature hidden; shipping unset = no totals);
+  admin editors; `scripts/import-catalog.ts`.
+- **Phase 4 — Go live:** owner enters prices/photos/settings in Firebase; owner sets Razorpay env vars +
+  webhook; test payment; enable checkout; deploy to Cloud Run; point thecalmflames.com.
 - **Later:** UI polish.
 
 ## Commands
-- Install: `npm install` (until Phase 1 lands: `bun install`)
-- Dev: `npm run dev` (port 3000) · Typecheck: `npm run lint` · Tests: `npm test` · Build: `npm run build`
+- Install: `npm install`
+- Dev: `npm run dev` (port 3000) · Typecheck: `npm run lint` · Tests: `npm test`
+- Build: `npm run build` (Vite storefront → `dist/`, bundled server → `dist-server/server.js`) · Prod: `npm start`
+- Container: `Dockerfile` (Node 22, listens on `$PORT`); deploy steps in `docs/deploy.md`
 - Emulator tests: `npm run test:emulator` (Firestore + Storage emulators; needs Java)
 - Catalogue migration: `npm run migrate:catalog [-- --dry-run]` · Admin: `npm run grant-admin -- <email>`
   (steps: `docs/catalog-migration.md`) · Rules deploy uses `firebase.deploy.json` (named database)
-- Real checkout additionally requires `CHECKOUT_ENABLED=true` (Phase 4 only).
+- Catalogue import: `npm run import:catalog -- <file.xlsx|.csv> [--photos <dir>] [--apply]` (dry run by default)
+- Taxonomy seed (create-only): `npm run seed:taxonomy`
+- Maintenance sweep: `npm run expire-reservations` (also `POST /api/admin/maintenance/expire-reservations`)
+- Real checkout additionally requires `CHECKOUT_ENABLED=true` (Phase 4 only) and shipping set in `settings/store`.
 - Env: copy `.env.example` → `.env.local`.
