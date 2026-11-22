@@ -194,7 +194,7 @@
 .sf .sum-row { display: flex; justify-content: space-between; gap: 16px; margin: 0; }
 .sf .field-err { color: #F3B7AE; font-size: 13px; margin: 6px 0 0; }
 .sf .in[aria-invalid="true"] { border-color: #F3B7AE; }
-.sf .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+.sf .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
 .sf .pick { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .sf .pick img, .sf .pick .noimg { width: 100%; aspect-ratio: 1; border-radius: 14px; object-fit: cover; background: var(--color-ink-2); }
 .sf .pick.on { border-color: var(--color-rose); box-shadow: 0 0 0 1px var(--color-rose) inset; }
