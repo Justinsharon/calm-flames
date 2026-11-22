@@ -300,17 +300,9 @@ describe('Route-Level Backend Integration & Production-Safety Test Suite', () =>
       expect(res.body.error).toMatch(/catalogue is temporarily unavailable/i);
     });
 
-    it('AI endpoints return 503 instead of falling back to static product data', async () => {
-      const calls = [
-        request(app).post('/api/ai/ritual').send({ productId: 'jumbo-tealight-mogra' }),
-        request(app).post('/api/ai/compare').send({ productIds: ['jumbo-tealight-mogra'] }),
-        request(app).post('/api/ai/find-flame').send({ feeling: 'Calm' }),
-        request(app).post('/api/ai/assistant').send({ message: 'hello' }),
-        request(app).post('/api/ai/gift').send({ recipient: 'Friend' })
-      ];
-      for (const res of await Promise.all(calls)) {
-        expect(res.status).toBe(503);
-      }
+    it('the gift guide returns 503 instead of falling back to static product data', async () => {
+      const res = await request(app).post('/api/gift-guide').send({ message: 'For my mother' });
+      expect(res.status).toBe(503);
     });
 
     it('reserveInventoryTransaction fails safely without writing', async () => {

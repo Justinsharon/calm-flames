@@ -11,6 +11,7 @@ export default defineConfig({
       FIRESTORE_DISABLED: '1',
       // Order-creation tests need the Phase 4 switch on; tests of the gate unset it themselves.
       CHECKOUT_ENABLED: 'true',
+      RATE_LIMIT_DISABLED: '1',
     },
     testTimeout: 10000,
   },

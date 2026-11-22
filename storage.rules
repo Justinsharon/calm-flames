@@ -35,6 +35,19 @@ service firebase.storage {
       allow delete: if isAdmin();
     }
 
+    // Help & Support: anyone (guests included) may attach ONE photo to a new support request.
+    // Images only, up to 5 MB, never overwritten, never publicly readable (admins only).
+    match /support/{requestId}/{fileName} {
+      allow read, delete: if isAdmin();
+      allow create: if requestId.matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+        && fileName.matches('^photo[.](jpg|png|webp)$')
+        && resource == null
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+      allow update: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

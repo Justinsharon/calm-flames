@@ -1,148 +1,89 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Product } from '../types';
-import { useCatalog } from './CatalogContext';
-import { auth, db } from '../lib/firebase';
-import { doc, getDocs, collection, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { useAuth } from './AuthContext';
+import { addFavourite, clearLocalWishlist, mergeLocalFavourites, readLocalWishlist, removeFavourite } from '../services/accountService';
 
+/**
+ * Favourites live in the account (customers/{uid}/wishlist). Guests who tap a heart are sent to
+ * sign in; the product is remembered for this tab and saved right after sign-in. Any wishlist
+ * kept on this device by the old storefront is merged into the account once, then cleared.
+ */
 interface WishlistContextType {
   wishlist: string[];
-  wishlistProducts: Product[];
-  toggleWishlist: (productId: string) => void;
   isInWishlist: (productId: string) => boolean;
-  isWishlistOpen: boolean;
-  setIsWishlistOpen: (open: boolean) => void;
-  lastFeedback: { message: string; visible: boolean } | null;
+  /** Signed in: toggles. Guest: returns 'sign-in' (caller sends them to sign in). */
+  toggleWishlist: (productId: string) => 'added' | 'removed' | 'sign-in';
+  loading: boolean;
 }
 
 const WishlistContext = createContext<WishlistContextType | undefined>(undefined);
+export const PENDING_FAVOURITE_KEY = 'tcf_pending_favourite';
 
-const WISHLIST_STORAGE_KEY = 'the_calm_flame_wishlist';
+export function rememberPendingFavourite(productId: string) {
+  try {
+    sessionStorage.setItem(PENDING_FAVOURITE_KEY, productId);
+  } catch {
+    /* ignore */
+  }
+}
 
 export const WishlistProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [wishlist, setWishlist] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(WISHLIST_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const { products } = useCatalog();
-  const [isWishlistOpen, setIsWishlistOpen] = useState(false);
-  const [lastFeedback, setLastFeedback] = useState<{ message: string; visible: boolean } | null>(null);
+  const { user } = useAuth();
+  const [wishlist, setWishlist] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(WISHLIST_STORAGE_KEY, JSON.stringify(wishlist));
-    } catch (e) {
-      console.warn('Failed to save wishlist', e);
+    if (!user) {
+      setWishlist([]);
+      return;
     }
-  }, [wishlist]);
-
-  // Sync with Firestore upon authentication change
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (user) {
+    let live = true;
+    setLoading(true);
+    (async () => {
+      try {
+        const local = readLocalWishlist();
+        let pending: string | null = null;
         try {
-          const userWishlistRef = collection(db, 'customers', user.uid, 'wishlist');
-          const snap = await getDocs(userWishlistRef);
-
-          if (!snap.empty) {
-            const serverIds: string[] = [];
-            snap.forEach((d) => serverIds.push(d.id));
-
-            setWishlist((prevLocal) => {
-              const merged = Array.from(new Set([...serverIds, ...prevLocal]));
-              // Upload missing local items to server
-              for (const locId of prevLocal) {
-                if (!serverIds.includes(locId)) {
-                  setDoc(doc(db, 'customers', user.uid, 'wishlist', locId), {
-                    productId: locId,
-                    addedAt: new Date().toISOString()
-                  }).catch(() => {});
-                }
-              }
-              return merged;
-            });
-          } else if (wishlist.length > 0) {
-            // Upload local wishlist to Firestore
-            const batch = writeBatch(db);
-            for (const id of wishlist) {
-              const itemRef = doc(db, 'customers', user.uid, 'wishlist', id);
-              batch.set(itemRef, {
-                productId: id,
-                addedAt: new Date().toISOString()
-              });
-            }
-            batch.commit().catch(() => {});
-          }
-        } catch (e) {
-          console.warn('Could not sync wishlist with Firestore:', e);
+          pending = sessionStorage.getItem(PENDING_FAVOURITE_KEY);
+          sessionStorage.removeItem(PENDING_FAVOURITE_KEY);
+        } catch {
+          /* ignore */
         }
+        const merged = await mergeLocalFavourites(user.uid, pending ? [...local, pending] : local);
+        clearLocalWishlist();
+        if (live) setWishlist(merged);
+      } catch (e) {
+        console.warn('Could not load favourites:', e);
+      } finally {
+        if (live) setLoading(false);
       }
-    });
+    })();
+    return () => {
+      live = false;
+    };
+  }, [user]);
 
-    return () => unsubscribe();
-  }, []);
+  const isInWishlist = useCallback((id: string) => wishlist.includes(id), [wishlist]);
 
-  const toggleWishlist = (productId: string) => {
-    const product = products.find((p) => p.id === productId);
-    const prodName = product ? product.name : 'Candle';
-
-    setWishlist((prev) => {
-      const exists = prev.includes(productId);
-      let updated: string[];
-      if (exists) {
-        setLastFeedback({ message: `Removed ${prodName} from saved rituals`, visible: true });
-        updated = prev.filter((id) => id !== productId);
-        if (auth.currentUser) {
-          deleteDoc(doc(db, 'customers', auth.currentUser.uid, 'wishlist', productId)).catch(() => {});
-        }
-      } else {
-        setLastFeedback({ message: `Saved ${prodName} to your ritual sanctuary`, visible: true });
-        updated = [...prev, productId];
-        if (auth.currentUser) {
-          setDoc(doc(db, 'customers', auth.currentUser.uid, 'wishlist', productId), {
-            productId,
-            addedAt: new Date().toISOString()
-          }).catch(() => {});
-        }
-      }
-      return updated;
-    });
-
-    setTimeout(() => {
-      setLastFeedback((prev) => (prev ? { ...prev, visible: false } : null));
-    }, 2800);
+  const toggleWishlist = (id: string): 'added' | 'removed' | 'sign-in' => {
+    if (!user) {
+      rememberPendingFavourite(id);
+      return 'sign-in';
+    }
+    if (wishlist.includes(id)) {
+      setWishlist((w) => w.filter((x) => x !== id));
+      removeFavourite(user.uid, id).catch(() => setWishlist((w) => [...w, id]));
+      return 'removed';
+    }
+    setWishlist((w) => [...w, id]);
+    addFavourite(user.uid, id).catch(() => setWishlist((w) => w.filter((x) => x !== id)));
+    return 'added';
   };
 
-  const isInWishlist = (productId: string) => wishlist.includes(productId);
-
-  // Resolved against the live catalogue, so saved items always show current price/photo.
-  const wishlistProducts = products.filter((p) => wishlist.includes(p.id));
-
-  return (
-    <WishlistContext.Provider
-      value={{
-        wishlist,
-        wishlistProducts,
-        toggleWishlist,
-        isInWishlist,
-        isWishlistOpen,
-        setIsWishlistOpen,
-        lastFeedback
-      }}
-    >
-      {children}
-    </WishlistContext.Provider>
-  );
+  return <WishlistContext.Provider value={{ wishlist, isInWishlist, toggleWishlist, loading }}>{children}</WishlistContext.Provider>;
 };
 
 export const useWishlist = () => {
-  const context = useContext(WishlistContext);
-  if (!context) {
-    throw new Error('useWishlist must be used within a WishlistProvider');
-  }
-  return context;
+  const c = useContext(WishlistContext);
+  if (!c) throw new Error('useWishlist must be used within a WishlistProvider');
+  return c;
 };

@@ -1,97 +1,72 @@
-import { doc, getDocs, setDoc, collection, query, where, orderBy, updateDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+/**
+ * Reviews (firestore.rules): id = {uid}_{productId}; created only by verified buyers (the server
+ * writes customers/{uid}/purchases/{productId}), always 'pending'; the public sees 'approved' only.
+ */
+import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where, type Firestore } from 'firebase/firestore';
+import { db as appDb } from '../lib/firebase';
 
+export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 export interface ProductReview {
-  id?: string;
+  id: string;
   productId: string;
   customerId: string;
-  customerName: string;
-  orderId?: string;
+  authorName: string;
   rating: number;
-  title: string;
+  title?: string;
   body: string;
-  isVerified: boolean;
-  isPublished: boolean;
+  status: ReviewStatus;
   createdAt: string;
 }
 
-export const reviewsService = {
-  async getReviewsForProduct(productId: string): Promise<ProductReview[]> {
-    try {
-      const revRef = collection(db, 'reviews');
-      const q = query(revRef, where('productId', '==', productId));
-      const snap = await getDocs(q);
+const fromDoc = (id: string, d: any): ProductReview => ({
+  id,
+  productId: d.productId,
+  customerId: d.customerId,
+  authorName: d.authorName,
+  rating: d.rating,
+  title: d.title,
+  body: d.body,
+  status: d.status,
+  createdAt: d.createdAt
+});
 
-      const list: ProductReview[] = [];
-      snap.forEach((d) => {
-        const item = { id: d.id, ...d.data() } as ProductReview;
-        if (item.isPublished !== false) {
-          list.push(item);
-        }
-      });
+export const reviewId = (uid: string, productId: string) => `${uid}_${productId}`;
 
-      if (list.length > 0) {
-        return list.sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
-      }
-    } catch (e) {
-      console.warn('Reviews fetch fallback:', e);
-    }
+export async function getApprovedReviews(productId: string, db: Firestore = appDb as Firestore): Promise<ProductReview[]> {
+  const snap = await getDocs(query(collection(db, 'reviews'), where('productId', '==', productId), where('status', '==', 'approved')));
+  return snap.docs.map((d) => fromDoc(d.id, d.data())).sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+}
 
-    // If no reviews in Firestore, return empty array (do not fabricate customer reviews)
-    return [];
-  },
+/** Can this signed-in customer review the product (bought it, not reviewed yet)? */
+export async function reviewEligibility(uid: string, productId: string, db: Firestore = appDb as Firestore): Promise<'can' | 'reviewed' | 'not-buyer'> {
+  const bought = await getDoc(doc(db, 'customers', uid, 'purchases', productId)).catch(() => null);
+  if (!bought?.exists()) return 'not-buyer';
+  const mine = await getDoc(doc(db, 'reviews', reviewId(uid, productId))).catch(() => null);
+  return mine?.exists() ? 'reviewed' : 'can';
+}
 
-  async submitReview(review: Omit<ProductReview, 'id' | 'createdAt' | 'isPublished'>): Promise<string> {
-    try {
-      const reviewId = `rev_${Date.now()}`;
-      const docRef = doc(db, 'reviews', reviewId);
+export async function submitReview(
+  r: { uid: string; productId: string; authorName: string; rating: number; title?: string; body: string },
+  db: Firestore = appDb as Firestore
+): Promise<void> {
+  const payload: Record<string, unknown> = {
+    productId: r.productId,
+    customerId: r.uid,
+    authorName: r.authorName.trim().slice(0, 60) || 'Customer',
+    rating: Math.round(r.rating),
+    body: r.body.trim(),
+    status: 'pending',
+    createdAt: new Date().toISOString()
+  };
+  if (r.title?.trim()) payload.title = r.title.trim().slice(0, 120);
+  await setDoc(doc(db, 'reviews', reviewId(r.uid, r.productId)), payload);
+}
 
-      const payload: ProductReview = {
-        ...review,
-        id: reviewId,
-        isPublished: true, // Default published, can be moderated in admin
-        createdAt: new Date().toISOString()
-      };
-
-      await setDoc(docRef, payload);
-      return reviewId;
-    } catch (e) {
-      console.warn('Could not submit review to Firestore:', e);
-      return '';
-    }
-  },
-
-  async getAllReviews(): Promise<ProductReview[]> {
-    try {
-      const revRef = collection(db, 'reviews');
-      const snap = await getDocs(revRef);
-      const list: ProductReview[] = [];
-      snap.forEach((d) => {
-        list.push({ id: d.id, ...d.data() } as ProductReview);
-      });
-      return list.sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
-    } catch (e) {
-      console.warn('Could not fetch all reviews:', e);
-      return [];
-    }
-  },
-
-  async toggleReviewModeration(reviewId: string, isPublished: boolean): Promise<void> {
-    try {
-      const docRef = doc(db, 'reviews', reviewId);
-      await updateDoc(docRef, { isPublished });
-    } catch (e) {
-      console.warn('Could not update review moderation:', e);
-    }
-  },
-
-  async deleteReview(reviewId: string): Promise<void> {
-    try {
-      const { deleteDoc } = await import('firebase/firestore');
-      const docRef = doc(db, 'reviews', reviewId);
-      await deleteDoc(docRef);
-    } catch (e) {
-      console.warn('Could not delete review:', e);
-    }
-  }
-};
+// ---- admin ----
+export async function getAllReviews(db: Firestore = appDb as Firestore): Promise<ProductReview[]> {
+  const snap = await getDocs(collection(db, 'reviews'));
+  return snap.docs.map((d) => fromDoc(d.id, d.data())).sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+}
+export const setReviewStatus = (id: string, status: ReviewStatus, db: Firestore = appDb as Firestore) =>
+  updateDoc(doc(db, 'reviews', id), { status, moderatedAt: new Date().toISOString() });
+export const deleteReview = (id: string, db: Firestore = appDb as Firestore) => deleteDoc(doc(db, 'reviews', id));

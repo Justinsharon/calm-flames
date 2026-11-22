@@ -1,11 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router';
+import { Outlet, useLocation } from 'react-router';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
+import { SignInModal } from './components/SignInPanel';
 import { matchRoute, paths } from '../lib/routes';
-import { WishlistDrawer } from '../components/wishlist/WishlistDrawer';
-import { AuthModal } from '../components/auth/AuthModal';
-import { CustomerAccountDrawer } from '../components/account/CustomerAccountDrawer';
 import { AdminDashboard } from '../components/admin/AdminDashboard';
 
 /**
@@ -17,10 +15,9 @@ import { AdminDashboard } from '../components/admin/AdminDashboard';
  */
 export const StorefrontLayout: React.FC = () => {
   const location = useLocation();
-  const navigate = useNavigate();
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const match = matchRoute(location.pathname);
-  const variant = !match || ['product', 'cart', 'checkout', 'orderConfirmed'].includes(match.name) ? 'solid' : 'overlay';
+  const variant = !match || ['product', 'cart', 'checkout', 'orderConfirmed', 'account'].includes(match.name) ? 'solid' : 'overlay';
 
   // New page: start at the top (but keep in-page #anchors working).
   useEffect(() => {
@@ -35,14 +32,12 @@ export const StorefrontLayout: React.FC = () => {
         </a>
         <Header variant={variant} />
         <main id="main" tabIndex={-1} style={{ outline: 'none' }}>
-          <Outlet />
+          <Outlet context={{ openAdmin: () => setIsAdminOpen(true) }} />
         </main>
         <Footer />
+        <SignInModal />
       </div>
 
-      <WishlistDrawer onExplore={() => navigate(paths.home())} onSelectProduct={(p) => navigate(paths.product(p))} />
-      <AuthModal />
-      <CustomerAccountDrawer onOpenAdmin={() => setIsAdminOpen(true)} onExploreProducts={() => navigate(paths.home())} />
       <AdminDashboard isOpen={isAdminOpen} onClose={() => setIsAdminOpen(false)} />
     </>
   );

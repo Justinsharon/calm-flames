@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import type { Product } from '../../types';
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
@@ -15,6 +15,8 @@ export const ProductCard: React.FC<{ product: Product; familyName?: string }> = 
   const { addToCart } = useCart();
   const [added, setAdded] = React.useState(false);
   const { toggleWishlist, isInWishlist } = useWishlist();
+  const navigate = useNavigate();
+  const location = useLocation();
   const saved = isInWishlist(p.id);
   const badge = productBadge(p);
   const second = p.galleryImages?.[1];
@@ -40,7 +42,7 @@ export const ProductCard: React.FC<{ product: Product; familyName?: string }> = 
         className={`heart${saved ? ' on' : ''}`}
         aria-pressed={saved}
         aria-label={saved ? `Remove ${p.name} from favourites` : `Save ${p.name} to favourites`}
-        onClick={() => toggleWishlist(p.id)}
+        onClick={() => toggleWishlist(p.id) === 'sign-in' && navigate(paths.signIn(location.pathname + location.search))}
       >
         <HeartIcon />
       </button>

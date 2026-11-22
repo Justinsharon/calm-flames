@@ -31,6 +31,29 @@ service cloud.firestore {
             || (request.resource.data.trackingUrl is string && request.resource.data.trackingUrl.matches('^https://[^ ]+$')));
     }
 
+    function isValidAddress(d) {
+      return d.keys().hasOnly(['label', 'fullName', 'phone', 'addressLine1', 'addressLine2', 'city', 'state', 'pincode', 'isDefault', 'updatedAt'])
+        && d.fullName is string && d.fullName.size() > 0 && d.fullName.size() <= 120
+        && d.phone is string && d.phone.matches('^[6-9][0-9]{9}$')
+        && d.addressLine1 is string && d.addressLine1.size() > 0 && d.addressLine1.size() <= 200
+        && (!('addressLine2' in d) || (d.addressLine2 is string && d.addressLine2.size() <= 200))
+        && (!('label' in d) || (d.label is string && d.label.size() <= 40))
+        && d.city is string && d.city.size() > 0 && d.city.size() <= 80
+        && d.state is string && d.state.size() > 0 && d.state.size() <= 80
+        && d.pincode is string && d.pincode.matches('^[1-9][0-9]{5}$')
+        && d.isDefault is bool;
+    }
+
+    function isValidReview(d) {
+      return d.keys().hasOnly(['productId', 'customerId', 'authorName', 'rating', 'title', 'body', 'status', 'createdAt'])
+        && d.productId is string && d.productId.size() > 0 && d.productId.size() <= 120
+        && d.rating is int && d.rating >= 1 && d.rating <= 5
+        && d.body is string && d.body.size() > 0 && d.body.size() <= 2000
+        && (!('title' in d) || (d.title is string && d.title.size() <= 120))
+        && d.authorName is string && d.authorName.size() > 0 && d.authorName.size() <= 60
+        && d.createdAt is string;
+    }
+
     function isAdmin() {
       return isSignedIn() &&
         get(/databases/$(database)/documents/customers/$(request.auth.uid)).data.get('role', 'customer') == 'admin';
@@ -188,26 +211,29 @@ service cloud.firestore {
         allow read, write: if isOwner(customerId) || isAdmin();
       }
 
-      match /wishlist/{itemId} {
-        allow read, write: if isOwner(customerId) || isAdmin();
+      // Favourites: one doc per product, id = product id.
+      match /wishlist/{productId} {
+        allow read, delete: if isOwner(customerId) || isAdmin();
+        allow create, update: if isOwner(customerId)
+          && request.resource.data.keys().hasOnly(['productId', 'addedAt'])
+          && request.resource.data.productId == productId
+          && request.resource.data.addedAt is string;
       }
 
       match /preferences/{prefId} {
         allow read, write: if isOwner(customerId) || isAdmin();
       }
 
-      match /rituals/{ritualId} {
-        allow read, write: if isOwner(customerId) || isAdmin();
+      // Saved delivery addresses (Indian pincode), at most one marked default by the app.
+      match /addresses/{addressId} {
+        allow read, delete: if isOwner(customerId) || isAdmin();
+        allow create, update: if isOwner(customerId) && isValidAddress(request.resource.data);
       }
 
-      match /rewards/{rewardId} {
+      // Products this customer has bought: written ONLY by the server; gates review creation.
+      match /purchases/{productId} {
         allow read: if isOwner(customerId) || isAdmin();
-        allow write: if isAdmin() || isOwner(customerId);
-      }
-
-      match /rewardTransactions/{txId} {
-        allow read: if isOwner(customerId) || isAdmin();
-        allow write: if isAdmin() || isOwner(customerId);
+        allow write: if false;
       }
     }
 
@@ -219,31 +245,41 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Payment records are written by the server (firebase-admin) only.
     match /payments/{paymentId} {
       allow read: if (isSignedIn() && resource.data.customerId == request.auth.uid) || isAdmin();
-      allow write: if isAdmin() || (isSignedIn() && request.resource.data.customerId == request.auth.uid);
+      allow write: if false;
     }
 
+    // Reviews: id = {uid}_{productId}; only verified buyers (server-written purchases doc) can
+    // create, always as 'pending'. Public sees approved reviews only; admins approve.
     match /reviews/{reviewId} {
-      allow read: if true;
-      allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
-      allow update, delete: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+      allow read: if (resource != null && resource.data.status == 'approved')
+        || (isSignedIn() && resource != null && resource.data.customerId == request.auth.uid)
+        || isAdmin();
+      allow create: if isSignedIn()
+        && reviewId == request.auth.uid + '_' + request.resource.data.productId
+        && exists(/databases/$(database)/documents/customers/$(request.auth.uid)/purchases/$(request.resource.data.productId))
+        && isValidReview(request.resource.data)
+        && request.resource.data.customerId == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'moderatedAt'])
+        && request.resource.data.status in ['pending', 'approved', 'rejected'];
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.customerId == request.auth.uid);
     }
 
-    match /moodInteractions/{interactionId} {
-      allow create: if true;
-      allow read: if isAdmin();
-      allow update, delete: if isAdmin();
+    // Support requests (call-back / damaged item) are created by the server; admins manage them.
+    match /supportRequests/{id} {
+      allow read, delete: if isAdmin();
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'adminNote', 'updatedAt'])
+        && request.resource.data.status in ['open', 'in_progress', 'resolved'];
+      allow create: if false;
     }
 
     match /razorpayEvents/{eventId} {
       allow read, write: if isAdmin();
-    }
-
-    match /analyticsEvents/{eventId} {
-      allow create: if true;
-      allow read: if isAdmin();
-      allow update, delete: if isAdmin();
     }
   }
 }

@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
-import { useWishlist } from '../../context/WishlistContext';
 import { useCatalog } from '../../context/CatalogContext';
 import { useTaxonomy } from '../../context/TaxonomyContext';
 import { inCollection, withProducts } from '../../lib/storefront';
@@ -19,8 +18,7 @@ export const Header: React.FC<{ variant: 'overlay' | 'solid' }> = ({ variant }) 
   const [open, setOpen] = useState(false);
   const { totalItems } = useCart();
   const { buildABox } = useStoreSettings();
-  const { user, profile, setIsAuthModalOpen, setIsAccountOpen } = useAuth();
-  const { setIsWishlistOpen } = useWishlist();
+  const { user, profile, setIsAuthModalOpen } = useAuth();
   const { products } = useCatalog();
   const { collections } = useTaxonomy();
   const location = useLocation();
@@ -62,14 +60,15 @@ export const Header: React.FC<{ variant: 'overlay' | 'solid' }> = ({ variant }) 
         <button ref={btnRef} type="button" className="nav-btn" aria-expanded={open} aria-controls="site-menu" onClick={() => setOpen((o) => !o)}>
           Menu
         </button>
-        <button
-          type="button"
-          className="nav-btn"
-          aria-label={user ? 'Your account' : 'Sign in'}
-          onClick={() => (user ? setIsAccountOpen(true) : setIsAuthModalOpen(true))}
-        >
-          {user ? <span className="avatar-initial">{initial}</span> : <PersonIcon />}
-        </button>
+        {user ? (
+          <Link to={paths.account()} className="nav-btn" aria-label="Your account" style={{ textDecoration: 'none' }}>
+            <span className="avatar-initial">{initial}</span>
+          </Link>
+        ) : (
+          <button type="button" className="nav-btn" aria-label="Sign in" onClick={() => setIsAuthModalOpen(true)}>
+            <PersonIcon />
+          </button>
+        )}
         <Link to={paths.cart()} className="nav-btn" aria-label={`Cart, ${totalItems} item${totalItems === 1 ? '' : 's'}`} style={{ textDecoration: 'none' }}>
           Cart ({totalItems})
         </Link>
@@ -92,9 +91,7 @@ export const Header: React.FC<{ variant: 'overlay' | 'solid' }> = ({ variant }) 
             <Link to={paths.journal()}>Journal</Link>
             <Link to={paths.info('our-story')}>Our Story</Link>
             <Link to={paths.support()}>Help &amp; Support</Link>
-            <button type="button" className="menu-link" onClick={() => (user ? setIsWishlistOpen(true) : setIsAuthModalOpen(true))}>
-              {user ? 'Favourites' : 'Sign in · Favourites'}
-            </button>
+            {user ? <Link to={paths.account('favourites')}>Favourites</Link> : <Link to={paths.signIn('/account')}>Sign in · Favourites</Link>}
           </div>
         </div>
       )}

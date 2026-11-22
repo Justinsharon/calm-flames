@@ -57,9 +57,9 @@ export const HomePage: React.FC = () => {
         <div className="hero-media" style={{ transform: `translate3d(${(hero.pos.x * -30).toFixed(1)}px, ${(hero.pos.y * -30).toFixed(1)}px, 0)` }}>
           <img className="drift" src={HERO_ASSET} alt="" style={{ objectPosition: '50% 40%' }} />
         </div>
-        <div className="hero-fade" aria-hidden="true" style={{ background: 'linear-gradient(180deg, rgba(30,11,15,.25) 0%, rgba(30,11,15,0) 22%, rgba(30,11,15,0) 55%, rgba(30,11,15,.45) 75%, rgba(30,11,15,1) 100%)' }} />
+        <div className="hero-fade" aria-hidden="true" style={{ background: 'linear-gradient(90deg, rgba(20,8,11,.72) 0%, rgba(20,8,11,.45) 55%, rgba(20,8,11,.12) 100%), linear-gradient(180deg, rgba(20,8,11,.55) 0%, rgba(20,8,11,.5) 35%, rgba(20,8,11,.55) 60%, rgba(30,11,15,.88) 85%, rgba(30,11,15,1) 100%)' }} />
         <div className="wrap" style={{ position: 'relative', zIndex: 10, minHeight: 'min(920px, 100svh)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', paddingTop: 150, paddingBottom: 200 }}>
-          <p className="eyebrow fade-in" style={{ animationDelay: '.2s', marginBottom: 8 }}>Hand-poured in India · Natural wax · Pure botanicals</p>
+          <p className="eyebrow fade-in" style={{ animationDelay: '.2s', marginBottom: 'clamp(10px, 2.4vw, 40px)' }}>Hand-poured in India · Natural wax · Pure botanicals</p>
           <h1 aria-label="Light. Breathe. Be." className="script" style={{ margin: 0, fontSize: 'clamp(4.2rem, 13vw, 210px)', lineHeight: 0.95, textShadow: '0 6px 40px rgba(30,11,15,.45)' }}>
             {['Light.', 'Breathe.', 'Be.'].map((w, i) => (
               <React.Fragment key={w}>
@@ -68,7 +68,7 @@ export const HomePage: React.FC = () => {
             ))}
           </h1>
           <div className="fade-in" style={{ animationDelay: '1.1s', display: 'flex', flexWrap: 'wrap', gap: 28, alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 28 }}>
-            <p className="serif" style={{ margin: 0, maxWidth: 440, fontSize: 24, lineHeight: 1.4, color: 'var(--color-ivory-2)' }}>
+            <p className="serif hero-sub" style={{ margin: 0, maxWidth: 440, fontSize: 24, lineHeight: 1.4, color: 'var(--color-ivory-2)' }}>
               Candles that slow an evening down, poured by hand in small batches.
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>

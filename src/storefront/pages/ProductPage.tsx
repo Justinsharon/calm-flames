@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { useCatalog } from '../../context/CatalogContext';
 import { useTaxonomy } from '../../context/TaxonomyContext';
 import { useCart } from '../../context/CartContext';
@@ -15,6 +15,8 @@ import { ProductGrid } from '../components/ProductCard';
 import { Accordion, Button, HeartIcon, MatchAvatar, QtyStepper, SectionHead } from '../components/ui';
 import { splitTitle } from './CollectionPage';
 import { NotFoundPage } from './NotFoundPage';
+import { ProductReviews } from '../components/Reviews';
+import { recordRecentlyViewed } from '../lib/recentlyViewed';
 
 export const ProductPage: React.FC = () => {
   const { slug = '' } = useParams();
@@ -23,6 +25,8 @@ export const ProductPage: React.FC = () => {
   const { addToCart } = useCart();
   const [added, setAdded] = useState(false);
   const { toggleWishlist, isInWishlist } = useWishlist();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { shipping, cod } = useStoreSettings();
   const { page: care } = usePage('candle-care');
   const { page: returnsPage } = usePage('returns');
@@ -33,6 +37,9 @@ export const ProductPage: React.FC = () => {
     setPhoto(0);
     setQty(1);
   }, [slug]);
+  useEffect(() => {
+    if (p?.id) recordRecentlyViewed(p.id);
+  }, [p?.id]);
   useDocumentMeta(p?.name || (loading ? undefined : 'Page not found'), p?.shortDescription || p?.description || p?.tagline);
 
   if (loading) {
@@ -177,7 +184,7 @@ export const ProductPage: React.FC = () => {
               </div>
             )}
             <div>
-              <Button variant="out" aria-pressed={saved} onClick={() => toggleWishlist(p.id)} style={{ width: '100%' }}>
+              <Button variant="out" aria-pressed={saved} onClick={() => toggleWishlist(p.id) === 'sign-in' && navigate(paths.signIn(location.pathname))} style={{ width: '100%' }}>
                 <HeartIcon /> {saved ? 'Saved to favourites' : 'Save to favourites'}
               </Button>
             </div>
@@ -186,7 +193,8 @@ export const ProductPage: React.FC = () => {
         </div>
       </section>
 
-      {/* Reviews: hidden until a real, approved review source exists. */}
+      {/* Reviews: approved only; hidden while there are none (and no review can be written). */}
+      <ProductReviews productId={p.id} />
 
       {related.length > 0 && (
         <section className="wrap" style={{ paddingTop: 60, paddingBottom: 110 }}>
