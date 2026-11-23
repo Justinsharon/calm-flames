@@ -150,6 +150,10 @@
 .sf .guide { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
 .sf .guide-btn { display: flex; align-items: center; gap: 12px; height: 60px; padding: 0 22px 0 8px; border-radius: 30px; border: 1px solid rgba(244,237,231,.25); background: rgba(92,22,34,.85); backdrop-filter: blur(14px); color: var(--color-ivory); font: inherit; font-weight: 700; font-size: 14px; cursor: pointer; box-shadow: 0 20px 50px rgba(0,0,0,.5); transition: transform .3s; }
 .sf .guide-btn:hover { transform: translateY(-3px); }
+/* The panel stacks ABOVE its trigger and is sized to the visible viewport (header 76px + gap +
+   60px button + 20px inset), so on phones it never covers the button that closes it. */
+.sf .guide-panel { width: 380px; max-width: calc(100vw - 32px); max-height: min(640px, calc(100svh - 76px - 14px - 60px - 20px - 8px)); background: rgba(30,11,15,.96); box-shadow: 0 40px 90px rgba(0,0,0,.6); display: flex; flex-direction: column; overflow: hidden; }
+@media (max-width: 600px) { .sf .guide { right: 16px; left: 16px; } .sf .guide-panel { width: 100%; max-width: none; } }
 
 /* ---- marquee ---- */
 .sf .marquee { overflow: hidden; border-top: 1px solid rgba(244,237,231,.14); padding: 18px 0; }

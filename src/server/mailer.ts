@@ -65,32 +65,95 @@ export function confirmationEmail(o: any): MailMessage {
   return { to: String(o.customer?.email || ''), subject: `Your Calm Flame order ${o.orderNumber}`, text, html };
 }
 
-/** Never throws (called fire-and-forget after an order is placed or paid). */
-export async function sendOrderConfirmation(orderNumber: string, mailer: Mailer | null = getMailer()): Promise<'sent' | 'skipped' | 'duplicate' | 'failed'> {
+export type SendResult = 'sent' | 'skipped' | 'duplicate' | 'failed';
+type OnceField = 'confirmationEmail' | 'orderAlertEmail' | 'shippedEmail';
+
+/**
+ * Send at most one email of a kind per order: the order's `field` is claimed in a transaction
+ * ('sending'), then marked 'sent' or 'failed'. `build` returns null when this kind should not be
+ * sent for the order (e.g. no tracking link yet). Never throws.
+ */
+export async function sendOnce(
+  orderNumber: string,
+  field: OnceField,
+  build: (order: any) => MailMessage | null,
+  mailer: Mailer | null
+): Promise<SendResult> {
   if (!mailer) {
-    console.log(`[mail] No mail provider configured (MAIL_PROVIDER); skipping confirmation for ${orderNumber}.`);
+    console.log(`[mail] No mail provider configured (MAIL_PROVIDER); skipping ${field} for ${orderNumber}.`);
     return 'skipped';
   }
   const db = getAdminDb();
   const ref = db.collection('orders').doc(orderNumber);
+  let msg: MailMessage | null = null;
   try {
-    const order = await db.runTransaction(async (tx) => {
+    const claimed = await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
-      if (!snap.exists) return null;
+      if (!snap.exists) return false;
       const o = snap.data()!;
-      if (o.confirmationEmail?.status === 'sent' || o.confirmationEmail?.status === 'sending') return null;
-      tx.update(ref, { confirmationEmail: { status: 'sending', provider: mailer.name, at: new Date().toISOString() } });
-      return o;
+      const st = o[field]?.status;
+      if (st === 'sent' || st === 'sending') return false;
+      msg = build(o);
+      if (!msg) return false;
+      tx.update(ref, { [field]: { status: 'sending', provider: mailer.name, at: new Date().toISOString() } });
+      return true;
     });
-    if (!order) return 'duplicate';
-    const msg = confirmationEmail(order);
-    if (!msg.to) throw new Error('Order has no email address.');
-    await mailer.send(msg);
-    await ref.update({ confirmationEmail: { status: 'sent', provider: mailer.name, at: new Date().toISOString() } });
+    if (!claimed || !msg) return 'duplicate';
+    const m: MailMessage = msg;
+    if (!m.to) throw new Error('No recipient address.');
+    await mailer.send(m);
+    await ref.update({ [field]: { status: 'sent', provider: mailer.name, at: new Date().toISOString() } });
     return 'sent';
   } catch (e: any) {
-    console.error(`[mail] Confirmation for ${orderNumber} failed:`, e?.message || e);
-    await ref.update({ confirmationEmail: { status: 'failed', provider: mailer.name, error: String(e?.message || e).slice(0, 200), at: new Date().toISOString() } }).catch(() => {});
+    console.error(`[mail] ${field} for ${orderNumber} failed:`, e?.message || e);
+    await ref.update({ [field]: { status: 'failed', provider: mailer.name, error: String(e?.message || e).slice(0, 200), at: new Date().toISOString() } }).catch(() => {});
     return 'failed';
   }
 }
+
+/** Customer confirmation (COD placed / payment confirmed). */
+export const sendOrderConfirmation = (orderNumber: string, mailer: Mailer | null = getMailer()) =>
+  sendOnce(orderNumber, 'confirmationEmail', (o) => confirmationEmail(o), mailer);
+
+/** Shop alert to ORDER_NOTIFY_EMAIL for a COD order or a paid order. */
+export function orderAlertEmail(o: any, to: string): MailMessage {
+  const pay = o.paymentMethod === 'cod' ? 'Cash on delivery' : 'Paid online';
+  const c = o.customer || {};
+  const lines: string[] = (Array.isArray(o.lines) ? o.lines : o.items || []).map((l: any) =>
+    l.kind === 'box'
+      ? `- Gift box of ${l.boxSize} (${(l.contents || []).map((x: any) => x.productName).join(', ')}${l.ribbon ? `, ${l.ribbon} ribbon` : ''}) × ${l.quantity}`
+      : `- ${l.productName || l.productId} × ${l.quantity}`
+  );
+  const text = [
+    `New order ${o.orderNumber}: ${inr(o.total)} (${pay})`,
+    '',
+    ...lines,
+    o.giftMessage ? `Gift message: ${o.giftMessage}` : '',
+    '',
+    `Ship to: ${c.fullName || ''}, ${[c.addressLine1, c.addressLine2, c.city, c.state, c.pincode].filter(Boolean).join(', ')}`,
+    `Phone: ${c.phone || ''} · Email: ${c.email || ''}`,
+    '',
+    'Open Admin → Orders to pack it.'
+  ].filter((x, i, a) => x !== '' || a[i - 1] !== '').join('\n');
+  return { to, subject: `New order ${o.orderNumber} · ${inr(o.total)} · ${pay}`, text, html: `<pre style="font-family:inherit;white-space:pre-wrap">${esc(text)}</pre>` };
+}
+export const sendOrderAlert = (orderNumber: string, env: NodeJS.ProcessEnv = process.env, mailer: Mailer | null = getMailer(env)) => {
+  const to = env.ORDER_NOTIFY_EMAIL;
+  if (!to) return Promise.resolve<SendResult>('skipped');
+  return sendOnce(orderNumber, 'orderAlertEmail', (o) => orderAlertEmail(o, to), mailer);
+};
+
+/** "Your order has shipped": once, the first time a tracking link is saved. */
+export function shippedEmail(o: any): MailMessage | null {
+  const url = typeof o.trackingUrl === 'string' && /^https:\/\/[^\s]+$/.test(o.trackingUrl) ? o.trackingUrl : null;
+  if (!url) return null;
+  const first = String(o.customer?.fullName || '').trim().split(/\s+/)[0] || 'there';
+  const text = [`Hello ${first},`, '', `Your order ${o.orderNumber} has left our studio and is on its way.`, '', `Track it here: ${url}`, '', 'Thank you for choosing a slower evening with us.', 'The Calm Flame'].join('\n');
+  const html = `<div style="font-family:Georgia,serif;color:#3A2226;max-width:560px">
+<p style="font-size:20px">Hello ${esc(first)},</p>
+<p>Your order <strong>${esc(String(o.orderNumber))}</strong> has left our studio and is on its way.</p>
+<p><a href="${esc(url)}" style="color:#7B1E2E">Track your parcel</a></p>
+<p>Thank you for choosing a slower evening with us.<br>The Calm Flame</p></div>`;
+  return { to: String(o.customer?.email || ''), subject: `Your Calm Flame order ${o.orderNumber} has shipped`, text, html };
+}
+export const sendShippedEmail = (orderNumber: string, mailer: Mailer | null = getMailer()) => sendOnce(orderNumber, 'shippedEmail', shippedEmail, mailer);

@@ -4,7 +4,7 @@ import express from 'express';
 import request from 'supertest';
 import { rateLimit } from '../server/rateLimit';
 import { fallbackSuggestions, giftableProducts, parseBudget } from '../server/giftGuide';
-import { validateSupport, PHOTO_PATH_RE } from '../server/support';
+import { validateSupport, sniffImage } from '../server/support';
 import { productIdsOfOrder } from '../server/purchases';
 import { checkSupportPhoto } from '../services/supportService';
 import { safeNext } from '../storefront/lib/recentlyViewed';
@@ -46,9 +46,12 @@ describe('gift guide fallback', () => {
     const g = giftableProducts(list);
     expect(fallbackSuggestions('a housewarming gift', g)[0].productId).toBe('urli');
     const floral = fallbackSuggestions('for my mother', g)[0];
-    expect(floral).toMatchObject({ productId: 'peony', price: 500, reason: 'Notes of peony, rose.' });
+    expect(floral).toMatchObject({ productId: 'peony', price: 500, reason: 'Peony and rose notes.' });
     expect(fallbackSuggestions('under ₹1,000', g).map((s) => s.productId)).toEqual(['peony']);
     expect(parseBudget('below Rs. 1,500 please')).toBe(1500);
+    const rich = p('jar', { name: 'Lotus Jar', notes: { top: ['lotus'], heart: ['jasmine'], base: ['sandalwood'] } as any, scentFamilySlug: 'floral' as any, collection: 'jar-candles' as any, occasions: ['birthday', 'housewarming'] as any });
+    expect(fallbackSuggestions('housewarming', [rich])[0].reason).toBe('Lotus, jasmine and sandalwood notes, from the Floral family, in our Jar Candles collection. Made for housewarming gifting.');
+    expect(fallbackSuggestions('under 2000', [p('bare', { name: 'Bare' })])[0].reason).toBe('Within your ₹2,000 budget.');
     expect(parseBudget('anything')).toBeNull();
   });
 });
@@ -64,15 +67,16 @@ describe('support validation', () => {
     [{ ...ok, email: 'nope' }, /email/],
     [{ ...ok, type: 'damaged' }, /order number/],
     [{ ...ok, message: '' }, /how we can help/],
-    [{ ...ok, photoPath: 'support/x/photo.gif' }, /photo/]
+    [{ ...ok, withPhoto: 'yes' }, /photo/]
   ])('rejects %#', (b, re) => {
     const r = validateSupport(b);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(re);
   });
   it('photo paths and client-side photo checks', () => {
-    expect(PHOTO_PATH_RE.test('support/0a1b2c3d-1111-4222-8333-444455556666/photo.webp')).toBe(true);
-    expect(PHOTO_PATH_RE.test('support/0a1b2c3d-1111-4222-8333-444455556666/../x.png')).toBe(false);
+    expect(sniffImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg');
+    expect(sniffImage(Buffer.from('RIFF0000WEBPVP8 ', 'latin1'))).toBe('image/webp');
+    expect(sniffImage(Buffer.from('<svg onload=alert(1)>'))).toBeNull();
     expect(checkSupportPhoto({ type: 'image/gif', size: 10 })).toMatch(/JPG/);
     expect(checkSupportPhoto({ type: 'image/png', size: 5 * 1024 * 1024 + 1 })).toMatch(/5 MB/);
     expect(checkSupportPhoto({ type: 'image/jpeg', size: 1000 })).toBeNull();
@@ -92,5 +96,35 @@ describe('accounts', () => {
   });
   it('purchases cover product lines and box contents', () => {
     expect(productIdsOfOrder({ lines: [{ kind: 'product', productId: 'a' }, { kind: 'box', contents: [{ productId: 'b' }, { productId: 'a' }] }], items: [{ productId: 'c' }] }).sort()).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('golive:check report (pure, read-only)', async () => {
+  const { buildReport, formatReport } = await import('../../scripts/golive/report');
+  const base = {
+    products: [
+      { id: 'a', name: 'Peony', price: 650, priceStatus: 'active', isActive: true },
+      { id: 'b', name: 'Urli', price: 0, priceStatus: 'missing', isActive: true },
+      { id: 'old', name: 'Old', price: 0, priceStatus: 'missing', isActive: false }
+    ],
+    inventory: { a: { availableQuantity: 3, status: 'in_stock' } },
+    settings: null,
+    present: { RAZORPAY_KEY_ID: true },
+    checkoutEnabledEnv: false,
+    admins: 1
+  };
+  it('blocks on unpriced products, missing shipping and missing Razorpay secrets; never shows values', () => {
+    const r = buildReport(base as any);
+    const byArea = Object.fromEntries(r.map((c) => [c.area, c]));
+    expect(byArea.Prices).toMatchObject({ level: 'block', message: '1 of 2 active products have no verified price: Urli.' });
+    expect(byArea.Stock).toMatchObject({ level: 'warn' });
+    expect(byArea.Shipping.level).toBe('block');
+    expect(byArea.Razorpay.message).toBe('Missing: RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET.');
+    expect(formatReport(r)).toMatch(/Not ready: 3 blocking item\(s\)\. Nothing was changed\./);
+  });
+  it('no blocking items once everything is in place', () => {
+    const r = buildReport({ ...base, products: base.products.slice(0, 1), settings: { freeShippingThreshold: 1500, shippingFee: 99 }, present: { RAZORPAY_KEY_ID: true, RAZORPAY_KEY_SECRET: true, RAZORPAY_WEBHOOK_SECRET: true }, publicSiteUrl: 'https://thecalmflames.com', rulesReleases: [{ name: 'cloud.firestore/db', updateTime: '2026-11-20T10:00:00Z' }] } as any);
+    expect(r.filter((c) => c.level === 'block')).toEqual([]);
+    expect(formatReport(r)).toContain('cloud.firestore/db last deployed 2026-11-20T10:00:00Z');
   });
 });

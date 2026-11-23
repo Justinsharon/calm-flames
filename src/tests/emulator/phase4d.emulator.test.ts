@@ -13,7 +13,6 @@ import { recordPurchases } from '../../server/purchases';
 import { resetRateLimits } from '../../server/rateLimit';
 import { addFavourite, getAddresses, getFavourites, getMyOrders, mergeLocalFavourites, saveAddress } from '../../services/accountService';
 import { submitReview, getApprovedReviews, reviewEligibility, setReviewStatus } from '../../services/reviewsService';
-import { uploadSupportPhoto } from '../../services/supportService';
 import { clearFirestore, realFetch, getData, jsonResponse, seedStoreSettings, TEST_SHIPPING } from './helpers';
 import { clientFor, deleteClientApps } from './clientApps';
 
@@ -222,61 +221,79 @@ describe('Help & Support: order lookup by number + phone', () => {
   });
 });
 
-describe('Help & Support: requests with an optional photo', () => {
-  const png = (bytes = 1024) => new Uint8Array(bytes).fill(7);
+describe('Help & Support: requests with an optional photo (server-stored, one-time ticket)', () => {
+  const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(2044, 7)]);
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(1016, 1)]);
   beforeEach(async () => {
     const [files] = await getAdminBucket().getFiles({ prefix: 'support/' });
     await Promise.all(files.map((f: any) => f.delete()));
   });
+  const create = (extra: Record<string, unknown> = {}) =>
+    request(app).post('/api/support').send({ type: 'damaged', name: 'Asha', phone: '98765 43210', orderNumber: 'tcf-654321', message: 'The jar arrived cracked.', withPhoto: true, ...extra });
+  const upload = (id: string, ticket: string | undefined, body: Buffer, type = 'image/jpeg') => {
+    const r = request(app).post(`/api/support/${id}/photo`).set('Content-Type', type);
+    return (ticket ? r.set('X-Upload-Ticket', ticket) : r).send(body);
+  };
 
-  it('storage rules: guests may add one small image under a new support folder; nothing else', async () => {
-    const guest = clientFor();
-    const id = '0a1b2c3d-1111-4222-8333-444455556666';
-    await uploadBytes(ref(guest.storage, `support/${id}/photo.png`), png(), { contentType: 'image/png' });
-    await expect(uploadBytes(ref(guest.storage, `support/${id}/photo.png`), png(), { contentType: 'image/png' })).rejects.toMatchObject(storageDenied); // no overwrite
-    await expect(uploadBytes(ref(guest.storage, 'support/22222222-1111-4222-8333-444455556666/photo.png'), png(5 * 1024 * 1024 + 1), { contentType: 'image/png' })).rejects.toMatchObject(storageDenied);
-    await expect(uploadBytes(ref(guest.storage, 'support/33333333-1111-4222-8333-444455556666/photo.png'), png(), { contentType: 'text/html' })).rejects.toMatchObject(storageDenied);
-    await expect(uploadBytes(ref(guest.storage, 'support/33333333-1111-4222-8333-444455556666/evil.svg'), png(), { contentType: 'image/png' })).rejects.toMatchObject(storageDenied);
-    await expect(uploadBytes(ref(guest.storage, 'support/not-a-uuid/photo.png'), png(), { contentType: 'image/png' })).rejects.toMatchObject(storageDenied);
-    await expect(getBytes(ref(guest.storage, `support/${id}/photo.png`))).rejects.toMatchObject(storageDenied);
-    await expect(getBytes(ref(clientFor(ASHA).storage, `support/${id}/photo.png`))).rejects.toMatchObject(storageDenied);
-    expect((await getBytes(ref(clientFor(ADMIN).storage, `support/${id}/photo.png`))).byteLength).toBe(1024);
+  it('storage rules: no client can write under support/; only admins read', async () => {
+    const path = 'support/0a1b2c3d-1111-4222-8333-444455556666/photo.png';
+    for (const who of [clientFor(), clientFor(ASHA), clientFor(ADMIN)]) {
+      await expect(uploadBytes(ref(who.storage, path), new Uint8Array(PNG), { contentType: 'image/png' })).rejects.toMatchObject(storageDenied);
+    }
+    await getAdminBucket().file(path).save(PNG, { contentType: 'image/png' });
+    await expect(getBytes(ref(clientFor().storage, path))).rejects.toMatchObject(storageDenied);
+    await expect(getBytes(ref(clientFor(ASHA).storage, path))).rejects.toMatchObject(storageDenied);
+    expect((await getBytes(ref(clientFor(ADMIN).storage, path))).byteLength).toBe(PNG.length);
   });
 
-  it('a damaged-item request with a photo is saved for the admin; bad input is refused', async () => {
-    const path = await uploadSupportPhoto(new Blob([png(2048)], { type: 'image/jpeg' }) as any, clientFor().storage);
-    expect(path).toMatch(/^support\/[0-9a-f-]{36}\/photo\.jpg$/);
-    const res = await request(app).post('/api/support').send({ type: 'damaged', name: 'Asha', phone: '98765 43210', orderNumber: 'tcf-654321', message: 'The jar arrived cracked.', photoPath: path });
+  it('a pending request + its ticket stores the photo once; the ticket cannot be reused', async () => {
+    const res = await create();
     expect(res.status).toBe(200);
-    const saved = await getData('supportRequests', res.body.id);
-    expect(saved).toMatchObject({ type: 'damaged', phone: '9876543210', orderNumber: 'TCF-654321', status: 'open', photo: { path, contentType: 'image/jpeg', size: 2048 } });
-    expect(saved).not.toHaveProperty('photoPath');
-    // same photo cannot be attached twice
-    expect((await request(app).post('/api/support').send({ type: 'damaged', name: 'A', phone: '9876543210', orderNumber: 'TCF-654321', message: 'again', photoPath: path })).status).toBe(409);
+    const { id, uploadTicket } = res.body;
+    expect(uploadTicket).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    const pending = await getData('supportRequests', id);
+    expect(pending).toMatchObject({ type: 'damaged', phone: '9876543210', orderNumber: 'TCF-654321', status: 'open', photo: null });
+    expect(JSON.stringify(pending)).not.toContain(uploadTicket); // only its hash is stored
+    expect((await upload(id, uploadTicket, JPEG)).status).toBe(200);
+    expect(await getData('supportRequests', id)).toMatchObject({ photo: { path: `support/${id}/photo.jpg`, contentType: 'image/jpeg', size: JPEG.length }, photoUpload: null });
+    expect((await getAdminBucket().file(`support/${id}/photo.jpg`).exists())[0]).toBe(true);
+    expect((await upload(id, uploadTicket, JPEG)).status).toBe(403); // used up
+  });
 
+  it('refuses uploads without a real pending request, with a wrong/expired ticket, or a bad file', async () => {
+    const { id, uploadTicket } = (await create()).body;
+    const unknown = '0a1b2c3d-1111-4222-8333-444455556666';
+    expect((await upload(unknown, uploadTicket, JPEG)).status).toBe(403); // no such request
+    expect((await upload(id, undefined, JPEG)).status).toBe(403);
+    expect((await upload(id, 'x'.repeat(32), JPEG)).status).toBe(403);
+    expect((await upload(id, uploadTicket, Buffer.from('<svg onload=alert(1)></svg>'), 'image/png')).status).toBe(415);
+    expect((await upload(id, uploadTicket, PNG, 'image/jpeg')).status).toBe(415); // declared type must match the bytes
+    expect((await upload(id, uploadTicket, Buffer.concat([JPEG, Buffer.alloc(5 * 1024 * 1024)]))).status).toBe(413);
+    // a request sent without withPhoto has no ticket at all
+    const plain = (await create({ withPhoto: false })).body;
+    expect(plain.uploadTicket).toBeUndefined();
+    expect((await upload(plain.id, uploadTicket, JPEG)).status).toBe(403);
+    // still valid after the failures above (nothing was consumed)
+    expect((await upload(id, uploadTicket, PNG, 'image/png')).status).toBe(200);
+    // expiry
+    const late = (await create()).body;
+    await getAdminDb().collection('supportRequests').doc(late.id).update({ 'photoUpload.expiresAt': new Date(Date.now() - 1000).toISOString() });
+    expect((await upload(late.id, late.uploadTicket, JPEG)).status).toBe(410);
+    expect((await getAdminBucket().getFiles({ prefix: `support/${late.id}/` }))[0]).toHaveLength(0);
+  });
+
+  it('validation still applies to the request itself', async () => {
     const bad = [
       { type: 'other', name: 'A', phone: '9876543210', message: 'x' },
       { type: 'callback', name: 'A', phone: '123', message: 'x' },
       { type: 'damaged', name: 'A', phone: '9876543210', message: 'no order number' },
       { type: 'callback', name: 'A', phone: '9876543210', message: 'x'.repeat(1001) },
-      { type: 'callback', name: 'A', phone: '9876543210', message: 'x', photoPath: 'products/peony/photo.jpg' },
-      { type: 'callback', name: 'A', phone: '9876543210', message: 'x', photoPath: 'support/44444444-1111-4222-8333-444455556666/photo.png' } // never uploaded
+      { type: 'callback', name: 'A', phone: '9876543210', message: 'x', withPhoto: 'yes' }
     ];
     for (const b of bad) expect((await request(app).post('/api/support').send(b)).status).toBe(400);
-  });
-
-  it('a file that is not an allowed image (placed around the rules) is rejected and deleted', async () => {
-    const path = 'support/55555555-1111-4222-8333-444455556666/photo.png';
-    await getAdminBucket().file(path).save(Buffer.from('<svg/>'), { contentType: 'image/svg+xml' });
-    const res = await request(app).post('/api/support').send({ type: 'callback', name: 'A', phone: '9876543210', message: 'hi', photoPath: path });
-    expect(res.status).toBe(400);
-    expect((await getAdminBucket().file(path).exists())[0]).toBe(false);
-  });
-
-  it('a call-back without a photo works', async () => {
-    const res = await request(app).post('/api/support').send({ type: 'callback', name: 'Ravi', phone: '9123456789', message: 'Please call about corporate gifting.', preferredTime: 'after 6 pm' });
-    expect(res.status).toBe(200);
-    expect(await getData('supportRequests', res.body.id)).toMatchObject({ type: 'callback', photo: null, preferredTime: 'after 6 pm' });
+    const ok = await request(app).post('/api/support').send({ type: 'callback', name: 'Ravi', phone: '9123456789', message: 'Please call about corporate gifting.', preferredTime: 'after 6 pm' });
+    expect(ok.status).toBe(200);
+    expect(await getData('supportRequests', ok.body.id)).toMatchObject({ type: 'callback', photo: null, photoUpload: null, preferredTime: 'after 6 pm' });
   });
 });
 

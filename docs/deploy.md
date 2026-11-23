@@ -1,4 +1,4 @@
-# Deploy to Cloud Run (staging)
+# Deploy to Cloud Run (staging, then production)
 
 Paste these into **Cloud Shell** (console.cloud.google.com → the `>_` icon), signed in as a
 project owner. Every block is safe to re-run. Checkout stays **disabled**: `CHECKOUT_ENABLED` is
@@ -162,9 +162,199 @@ in the project). After rotating `MAINTENANCE_SECRET`, redeploy (step 4) and upda
 gcloud scheduler jobs update http calm-flames-maintenance --location="$REGION" --update-headers="X-Maintenance-Key=$(gcloud secrets versions access latest --secret=MAINTENANCE_SECRET)"
 ```
 
+## 6. Production service `calm-flames`
+
+Production is a **second Cloud Run service** built from the **same image** as staging, running as
+the **same runtime service account** (step 2), with **its own secrets** (live Razorpay keys etc.).
+Staging keeps its test keys. Checkout stays off until you set `CHECKOUT_ENABLED` yourself (6.4).
+
+Paste the variables from step 0 first, then:
+
+```bash
+PROD_SERVICE=calm-flames
+SITE=https://thecalmflames.com
+```
+
+### 6.1 Production secrets
+
+The production copies end in `_PROD` so they can never be mixed up with staging. Use the
+`add_secret` helper from step 3 (paste it again in a new Cloud Shell):
+
+```bash
+add_secret RAZORPAY_KEY_ID_PROD
+```
+
+```bash
+add_secret RAZORPAY_KEY_SECRET_PROD
+```
+
+```bash
+add_secret RAZORPAY_WEBHOOK_SECRET_PROD
+```
+
+Optional (each feature stays off without it):
+
+```bash
+add_secret GEMINI_API_KEY_PROD
+```
+
+```bash
+add_secret RESEND_API_KEY_PROD
+```
+
+```bash
+openssl rand -hex 32 | tr -d '\n' | gcloud secrets create MAINTENANCE_SECRET_PROD --replication-policy=automatic --data-file=- && gcloud secrets add-iam-policy-binding MAINTENANCE_SECRET_PROD --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor >/dev/null
+```
+
+### 6.2 Deploy the image staging is running
+
+This reuses the exact image staging runs (no rebuild), mounts each `_PROD` secret that exists
+under the normal name the server reads, and sets only non-secret settings. It never sets
+`CHECKOUT_ENABLED`.
+
+```bash
+IMAGE=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(spec.template.spec.containers[0].image)'); echo "$IMAGE"
+```
+
+```bash
+SECRETS=""
+for s in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_WEBHOOK_SECRET GEMINI_API_KEY MAINTENANCE_SECRET RESEND_API_KEY; do
+  if gcloud secrets describe "${s}_PROD" >/dev/null 2>&1; then SECRETS="${SECRETS:+$SECRETS,}$s=${s}_PROD:latest"; fi
+done
+echo "Mounting: ${SECRETS:-none}"
+gcloud run deploy "$PROD_SERVICE" --image "$IMAGE" --region "$REGION" --service-account "$SA" --allow-unauthenticated --memory 512Mi --min-instances 1 --max-instances 10 \
+  --update-env-vars "NODE_ENV=production,PUBLIC_SITE_URL=$SITE" ${SECRETS:+--set-secrets "$SECRETS"}
+```
+
+Optional email settings (not secret), only once you have a sending domain in Resend:
+
+```bash
+gcloud run services update "$PROD_SERVICE" --region "$REGION" --update-env-vars "MAIL_PROVIDER=resend,MAIL_FROM=The Calm Flame <orders@thecalmflames.com>,ORDER_NOTIFY_EMAIL=you@example.com,SUPPORT_NOTIFY_EMAIL=you@example.com"
+```
+
+`PUBLIC_SITE_URL` is what makes **only** `thecalmflames.com` indexable: every other host (the
+`*.run.app` URL, staging, www) gets `robots.txt: Disallow: /` and `X-Robots-Tag: noindex`, and
+`www.` is redirected to the apex by the server. **Never set `PUBLIC_SITE_URL` on staging.**
+
+Check it (expect `"checkoutEnabled":false`):
+
+```bash
+PROD_URL=$(gcloud run services describe "$PROD_SERVICE" --region "$REGION" --format='value(status.url)'); curl -s "$PROD_URL/api/checkout/readiness"; echo; curl -s "$PROD_URL/robots.txt"
+```
+
+Later releases: deploy staging (step 4), check it, then run 6.2 again to promote that image.
+
+### 6.3 Domain: thecalmflames.com + www
+
+**Region note.** Cloud Run *domain mappings* are only offered in some regions, and as far as we
+know **asia-south1 (Mumbai) is not one of them**. Check before choosing:
+
+```bash
+gcloud beta run domain-mappings list --region "$REGION"
+```
+
+If that errors with a region/unsupported message, use **Option A**. If it works, Option B is
+also possible.
+
+**Option A (recommended): Firebase Hosting in front of the Cloud Run service.** Same Firebase
+project, free managed SSL, works with any Cloud Run region.
+
+1. In this repo, the file `firebase.hosting.json` (added below) rewrites every path to the
+   `calm-flames` service. Deploy it from Cloud Shell in the repo folder:
+
+   ```bash
+   npx firebase-tools deploy --only hosting --config firebase.hosting.json --project "$PROJECT_ID"
+   ```
+
+2. Firebase console → **Hosting → Add custom domain** → `thecalmflames.com` → follow the steps.
+   Then add `www.thecalmflames.com` and choose **"Redirect to thecalmflames.com"**.
+3. Add **exactly the DNS records the console shows you** at your domain registrar. They are:
+   - a **TXT** record on `thecalmflames.com` (`hosting-site=…`, ownership check), then
+   - an **A** record on `thecalmflames.com` (`@`) pointing to the IP address the console gives, and
+   - for `www`, the record the console gives (an A record or a CNAME to `thecalmflames.com`).
+   Copy them from the console rather than from here: Firebase can change these values.
+4. Remove any other A / AAAA / CNAME records on `@` and `www` that point elsewhere. SSL is
+   issued automatically (minutes to a few hours).
+
+**Option B: Cloud Run domain mapping** (only if the list command above works in your region):
+
+```bash
+gcloud domains verify thecalmflames.com
+```
+
+```bash
+gcloud beta run domain-mappings create --service "$PROD_SERVICE" --domain thecalmflames.com --region "$REGION"
+```
+
+```bash
+gcloud beta run domain-mappings create --service "$PROD_SERVICE" --domain www.thecalmflames.com --region "$REGION"
+```
+
+Print the records Google expects, then add them at the registrar:
+
+```bash
+gcloud beta run domain-mappings describe --domain thecalmflames.com --region "$REGION" --format='table(status.resourceRecords[].type,status.resourceRecords[].rrdata)'
+```
+
+```bash
+gcloud beta run domain-mappings describe --domain www.thecalmflames.com --region "$REGION" --format='table(status.resourceRecords[].type,status.resourceRecords[].rrdata)'
+```
+
+For Cloud Run these are normally:
+
+| Host | Type | Value |
+|---|---|---|
+| `@` (thecalmflames.com) | A | `216.239.32.21`, `216.239.34.21`, `216.239.36.21`, `216.239.38.21` |
+| `@` | AAAA | `2001:4860:4802:32::15`, `2001:4860:4802:34::15`, `2001:4860:4802:36::15`, `2001:4860:4802:38::15` |
+| `www` | CNAME | `ghs.googlehosted.com.` |
+
+If the `describe` output differs, **use the describe output**. Both hosts reach the same service;
+the server sends `www` to `https://thecalmflames.com` with a permanent (301) redirect.
+
+**After the domain works (either option):** Firebase console → Authentication → Settings →
+Authorized domains → add `thecalmflames.com` (Google sign-in). Then set the Razorpay webhook URL
+to `https://thecalmflames.com/api/webhooks/razorpay` in the Razorpay dashboard (live mode).
+
+### 6.4 Turning checkout on (owner only)
+
+Run `npm run golive:check -- --url https://thecalmflames.com` first; it changes nothing and
+lists anything still blocking (prices, stock, shipping settings, Razorpay secrets). When you have
+made a test payment and decided to open the shop:
+
+```bash
+gcloud run services update "$PROD_SERVICE" --region "$REGION" --update-env-vars CHECKOUT_ENABLED=true
+```
+
+To close checkout again at any time:
+
+```bash
+gcloud run services update "$PROD_SERVICE" --region "$REGION" --remove-env-vars CHECKOUT_ENABLED
+```
+
+### 6.5 Maintenance sweep for production (second Cloud Scheduler job)
+
+```bash
+PROD_URL=$(gcloud run services describe "$PROD_SERVICE" --region "$REGION" --format='value(status.url)')
+gcloud scheduler jobs create http calm-flames-maintenance-prod --location="$REGION" --schedule="*/15 * * * *" --time-zone="Asia/Kolkata" --http-method=POST --uri="$PROD_URL/api/admin/maintenance/expire-reservations" --headers="Content-Type=application/json,X-Maintenance-Key=$(gcloud secrets versions access latest --secret=MAINTENANCE_SECRET_PROD)" --message-body='{}' --attempt-deadline=120s
+```
+
+```bash
+gcloud scheduler jobs run calm-flames-maintenance-prod --location="$REGION"
+```
+
+After rotating `MAINTENANCE_SECRET_PROD`: run 6.2 again, then
+
+```bash
+gcloud scheduler jobs update http calm-flames-maintenance-prod --location="$REGION" --update-headers="X-Maintenance-Key=$(gcloud secrets versions access latest --secret=MAINTENANCE_SECRET_PROD)"
+```
+
+### 6.6 Daily backups
+
+See `docs/backups.md` (daily Firestore export of the named database to a bucket that deletes
+exports after 30 days).
+
 ## What is NOT done here
 
-- Real checkout (`CHECKOUT_ENABLED=true`), live Razorpay keys, the Razorpay webhook URL and the
-  custom domain are Phase 4 go-live steps.
+- Nothing in this file turns real checkout on except the explicit command in 6.4.
 - The image is built from the `Dockerfile` (Node 22, `npm ci`, `npm run build`, production
   dependencies only, runs as the non-root `node` user). No secrets are baked into it.

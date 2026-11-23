@@ -56,10 +56,9 @@ export const GiftGuide: React.FC<{ open: boolean; setOpen: (o: boolean) => void 
     <div className="guide">
       {open && (
         <div
-          className="glass"
           role="dialog"
           aria-label="Gift guide"
-          style={{ width: 380, maxWidth: 'calc(100vw - 32px)', maxHeight: 'min(640px, calc(100vh - 120px))', background: 'rgba(30,11,15,.96)', boxShadow: '0 40px 90px rgba(0,0,0,.6)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          className="glass guide-panel"
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: '1px solid rgba(244,237,231,.12)' }}>
             <MatchAvatar />

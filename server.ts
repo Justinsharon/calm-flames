@@ -14,12 +14,13 @@ import {
 import { runTestHook } from './src/server/testHooks';
 import { rateLimit } from './src/server/rateLimit';
 import { suggestGifts } from './src/server/giftGuide';
-import { lookupOrder, validateSupport, createSupportRequest, notifySupport } from './src/server/support';
+import { lookupOrder, validateSupport, createSupportRequest, notifySupport, attachSupportPhoto, MAX_PHOTO_BYTES } from './src/server/support';
 import { GIFT_GUIDE_MAX_INPUT } from './src/lib/giftGuide';
 import { priceCart, computeTotals, productIdsOf } from './src/server/quote';
 import { loadCoupon } from './src/server/couponService';
 import { newViewToken, hashViewToken, getOrderForViewer } from './src/server/orderView';
 import { afterOrderPlaced } from './src/server/purchases';
+import { setTrackingAndNotify } from './src/server/orderAdmin';
 import { normalizeLines } from './src/lib/cartLines';
 import { validateCustomer, cleanCustomer } from './src/lib/checkoutForm';
 import { confirmOrderPaymentFromVerify, type VerifyTransitionOutcome } from './src/server/orderTransitions';
@@ -28,6 +29,7 @@ import { expireAbandonedOrders, resolveOrderMaxAgeMinutes } from './src/server/o
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import fs from 'fs';
 import { resolveMeta, injectMeta } from './src/server/seo';
+import { redirectWwwToApex, noindexOutsidePublicHost, requestHost, isPublicHost, publicOrigin, robotsTxt, sitemapXml, sitemapEntries } from './src/server/siteIndex';
 import { getAdminApp } from './src/server/firestoreAdmin';
 import { getAdminDb, doc, getDoc, runTransaction } from './src/server/firestoreAdmin';
 
@@ -55,9 +57,31 @@ export const limits = {
   newsletter: rateLimit({ name: 'newsletter', windowMs: 60 * 60_000, max: 5 }),
   giftGuide: rateLimit({ name: 'giftGuide', windowMs: 10 * 60_000, max: 20 }),
   support: rateLimit({ name: 'support', windowMs: 60 * 60_000, max: 5 }),
+  supportPhoto: rateLimit({ name: 'supportPhoto', windowMs: 60 * 60_000, max: 10 }),
   orderLookup: rateLimit({ name: 'orderLookup', windowMs: 10 * 60_000, max: 10 }),
   orderView: rateLimit({ name: 'orderView', windowMs: 60_000, max: 60 })
 };
+
+// Only the public host (PUBLIC_SITE_URL) may be indexed; staging and *.run.app never are.
+app.use(redirectWwwToApex);
+app.use(noindexOutsidePublicHost);
+
+app.get('/robots.txt', (req: Request, res: Response) => {
+  res.type('text/plain').setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(robotsTxt(isPublicHost(requestHost(req)), publicOrigin()));
+});
+
+app.get('/sitemap.xml', async (req: Request, res: Response) => {
+  const origin = publicOrigin();
+  if (!origin || !isPublicHost(requestHost(req))) return res.status(404).type('text/plain').send('Not found');
+  try {
+    res.type('application/xml').setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(sitemapXml(origin, await sitemapEntries()));
+  } catch (e) {
+    console.error('Sitemap error:', e);
+    return res.status(503).type('text/plain').send('Sitemap unavailable');
+  }
+});
 
 app.use(
   express.json({
@@ -1995,6 +2019,31 @@ app.post('/api/gift-guide', limits.giftGuide, async (req: Request, res: Response
   return res.json(await suggestGifts(message, catalog));
 });
 
+/**
+ * Admin saves (or clears) an order's tracking link. The first time a link is saved, the customer
+ * gets one "your order has shipped" email (if a mail provider is configured). Admin ID token only.
+ */
+app.post('/api/admin/orders/:orderNumber/tracking', async (req: Request, res: Response) => {
+  const authz = String(req.headers.authorization || '');
+  if (!authz.startsWith('Bearer ')) return res.status(401).json({ error: 'Authentication required.' });
+  let uid: string;
+  try {
+    uid = (await getAdminAuth(getAdminApp()).verifyIdToken(authz.slice(7))).uid;
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired sign-in token.' });
+  }
+  try {
+    const profile = await getAdminDb().collection('customers').doc(uid).get();
+    if (profile.data()?.role !== 'admin') return res.status(403).json({ error: 'Admin role required.' });
+    const r = await setTrackingAndNotify(req.params.orderNumber, req.body?.trackingUrl);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json(r);
+  } catch (e) {
+    console.error('Tracking update error:', e);
+    return res.status(503).json({ error: 'Could not save the tracking link.' });
+  }
+});
+
 /** Help & Support order tracking: order number AND checkout phone must match (404 otherwise). */
 app.post('/api/orders/lookup', limits.orderLookup, async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -2008,20 +2057,36 @@ app.post('/api/orders/lookup', limits.orderLookup, async (req: Request, res: Res
   }
 });
 
-/** Call-back / damaged-item requests (optional photo already uploaded to support/{uuid}/). */
+/** Call-back / damaged-item requests. `withPhoto: true` returns a one-time upload ticket. */
 app.post('/api/support', limits.support, async (req: Request, res: Response) => {
   const v = validateSupport(req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
   try {
     const r = await createSupportRequest(v.value);
-    if ('error' in r) return res.status(r.status).json({ error: r.error });
     void notifySupport(r.id, v.value);
-    return res.json({ ok: true, id: r.id });
+    return res.json({ ok: true, ...r });
   } catch (e) {
     console.error('Support request error:', e);
     return res.status(503).json({ error: 'We could not send your request right now. Please try again shortly.' });
   }
 });
+
+/** The photo for a pending support request (raw image body, X-Upload-Ticket header). */
+app.post(
+  '/api/support/:id/photo',
+  limits.supportPhoto,
+  express.raw({ type: () => true, limit: MAX_PHOTO_BYTES + 1 }),
+  async (req: Request, res: Response) => {
+    try {
+      const r = await attachSupportPhoto(req.params.id, req.headers['x-upload-ticket'], req.headers['content-type'], req.body);
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error('Support photo error:', e);
+      return res.status(503).json({ error: 'We could not save the photo right now.' });
+    }
+  }
+);
 
 app.post('/api/newsletter', limits.newsletter, async (req: Request, res: Response) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
@@ -2154,8 +2219,9 @@ async function startServer() {
     // Every non-API GET gets the SPA, with that URL's title/description (404 status if unknown).
     app.get('*', async (req, res) => {
       const meta = await resolveMeta(req.path);
+      const origin = publicOrigin();
       res.status(meta.status).setHeader('Cache-Control', 'no-cache');
-      res.type('html').send(injectMeta(template, meta));
+      res.type('html').send(injectMeta(template, meta, { canonicalUrl: origin ? origin + (req.path === '/' ? '/' : req.path.replace(/\/+$/, '')) : undefined }));
     });
   } else {
     const { createServer: createViteServer } = await import('vite');

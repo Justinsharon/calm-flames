@@ -7,6 +7,7 @@
 import type { Product } from '../types';
 import { hasVerifiedPrice } from '../lib/productMapping';
 import type { GiftGuideResponse, GiftSuggestion } from '../lib/giftGuide';
+import { TAXONOMY_SEED_NAMES } from '../lib/taxonomy';
 
 export function giftableProducts(catalog: Record<string, Product> | Product[]): Product[] {
   const list = Array.isArray(catalog) ? catalog : Object.values(catalog);
@@ -61,13 +62,28 @@ export function fallbackSuggestions(message: string, products: Product[], limit 
   return scored.slice(0, limit).map(({ p, hits }) => toSuggestion(p, fallbackReason(p, hits, budget)));
 }
 
-function fallbackReason(p: Product, hits: string[], budget: number | null): string {
+/**
+ * Reason built only from the product's own fields: notes, scent family, collection and the
+ * occasion it is tagged for (the one the shopper asked about first), plus the budget if given.
+ */
+export function fallbackReason(p: Product, hits: string[], budget: number | null): string {
+  const a: any = p;
+  const names = TAXONOMY_SEED_NAMES as any;
   const notes = notesOf(p).slice(0, 3);
-  const parts: string[] = [];
-  if (notes.length) parts.push(`Notes of ${notes.join(', ')}`);
-  else if (hits.length) parts.push(`Matches “${hits.slice(0, 2).join('”, “')}”`);
-  if (budget) parts.push(`within your ₹${budget.toLocaleString('en-IN')} budget`);
-  return parts.length ? `${parts.join(', ')}.` : 'A well-loved choice from our studio.';
+  const family = a.scentFamilySlug ? names.scentFamilies?.[a.scentFamilySlug] : undefined;
+  const collection = a.collection ? names.collections?.[a.collection] : undefined;
+  const occ: string[] = Array.isArray(a.occasions) ? a.occasions : [];
+  const occasion = occ.find((o) => hits.some((h) => o.includes(h) || h.includes(o))) || occ[0];
+  const occasionName = occasion ? names.occasions?.[occasion] || occasion.replace(/-/g, ' ') : undefined;
+  const bits: string[] = [];
+  if (notes.length) bits.push(`${notes.length > 1 ? `${notes.slice(0, -1).join(', ')} and ${notes[notes.length - 1]}` : notes[0]} notes`);
+  if (family) bits.push(`from the ${family} family`);
+  if (collection) bits.push(`in our ${collection} collection`);
+  let out = bits.length ? bits.join(', ') : '';
+  if (occasionName) out = out ? `${out}. Made for ${occasionName.toLowerCase()} gifting` : `Made for ${occasionName.toLowerCase()} gifting`;
+  if (budget) out = out ? `${out}, within your ₹${budget.toLocaleString('en-IN')} budget` : `Within your ₹${budget.toLocaleString('en-IN')} budget`;
+  if (!out) out = hits.length ? `Matches what you asked for (${hits.slice(0, 2).join(', ')})` : 'A well-loved choice from our studio';
+  return `${out.charAt(0).toUpperCase()}${out.slice(1)}.`;
 }
 
 function toSuggestion(p: Product, reason: string): GiftSuggestion {

@@ -18,7 +18,8 @@
     "build:server": "esbuild server.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist-server/server.js --log-level=warning && node scripts/check-server-deps.mjs",
     "seed:taxonomy": "tsx scripts/seed-taxonomy.ts",
     "import:catalog": "tsx scripts/import-catalog.ts",
-    "migrate:coupons": "tsx scripts/migrate-coupons.ts"
+    "migrate:coupons": "tsx scripts/migrate-coupons.ts",
+    "golive:check": "tsx scripts/golive-check.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.3",

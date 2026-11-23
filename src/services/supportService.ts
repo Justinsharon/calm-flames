@@ -1,22 +1,27 @@
-/** Help & Support (browser): optional photo goes to Storage support/{uuid}/, then the server saves the request. */
-import { ref, uploadBytes, type FirebaseStorage } from 'firebase/storage';
-import { storage as appStorage } from '../lib/firebase';
-
+/** Help & Support (browser): send the request, then (optionally) its photo with the one-time ticket. */
 export const MAX_SUPPORT_PHOTO = 5 * 1024 * 1024;
-const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-/** Client-side check (storage.rules and the server check again). */
+/** Client-side check (the server checks size and the actual image bytes again). */
 export function checkSupportPhoto(f: { type: string; size: number }): string | null {
-  if (!EXT[f.type]) return 'Photos must be JPG, PNG or WebP.';
+  if (!TYPES.includes(f.type)) return 'Photos must be JPG, PNG or WebP.';
   if (f.size <= 0 || f.size > MAX_SUPPORT_PHOTO) return 'Photos can be up to 5 MB.';
   return null;
 }
 
-export async function uploadSupportPhoto(file: Blob & { type: string; size: number }, storage: FirebaseStorage = appStorage as FirebaseStorage): Promise<string> {
+export async function sendSupportRequest(body: Record<string, unknown>): Promise<{ id: string; uploadTicket?: string }> {
+  const r = await fetch('/api/support', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || 'We could not send your request.');
+  return d;
+}
+
+export async function uploadSupportPhoto(id: string, ticket: string, file: Blob & { type: string; size: number }): Promise<void> {
   const err = checkSupportPhoto(file);
   if (err) throw new Error(err);
-  const id = crypto.randomUUID();
-  const path = `support/${id}/photo.${EXT[file.type]}`;
-  await uploadBytes(ref(storage, path), file, { contentType: file.type });
-  return path;
+  const r = await fetch(`/api/support/${encodeURIComponent(id)}/photo`, { method: 'POST', headers: { 'Content-Type': file.type, 'X-Upload-Ticket': ticket }, body: file });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.error || 'The photo could not be uploaded.');
+  }
 }
