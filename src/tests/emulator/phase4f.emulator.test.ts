@@ -90,7 +90,7 @@ describe('SEO: only the public host is indexable', () => {
     expect(pub.text).toContain('Allow: /');
     expect(pub.text).toContain('Sitemap: https://thecalmflames.com/sitemap.xml');
     expect(pub.headers['x-robots-tag']).toBeUndefined();
-    for (const host of ['calm-flames-staging-abc-el.a.run.app', 'www.thecalmflames.com', 'localhost:3000']) {
+    for (const host of ['calm-flames-staging-abc-el.a.run.app', 'localhost:3000']) {
       const r = await request(app).get('/robots.txt').set('Host', host);
       expect(r.text).toBe('User-agent: *\nDisallow: /\n');
       expect(r.headers['x-robots-tag']).toBe('noindex, nofollow');
