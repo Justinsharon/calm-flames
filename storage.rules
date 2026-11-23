@@ -35,17 +35,12 @@ service firebase.storage {
       allow delete: if isAdmin();
     }
 
-    // Help & Support: anyone (guests included) may attach ONE photo to a new support request.
-    // Images only, up to 5 MB, never overwritten, never publicly readable (admins only).
-    match /support/{requestId}/{fileName} {
+    // Help & Support photos are stored by the SERVER only (it checks a one-time upload ticket for
+    // a real pending request, the 5 MB limit and the image bytes). Clients never write here;
+    // only admins can view them.
+    match /support/{allPaths=**} {
       allow read, delete: if isAdmin();
-      allow create: if requestId.matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
-        && fileName.matches('^photo[.](jpg|png|webp)$')
-        && resource == null
-        && request.resource.size > 0
-        && request.resource.size <= 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/(jpeg|png|webp)');
-      allow update: if false;
+      allow create, update: if false;
     }
 
     match /{allPaths=**} {

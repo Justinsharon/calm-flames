@@ -4,7 +4,7 @@ import express from 'express';
 import request from 'supertest';
 import { rateLimit } from '../server/rateLimit';
 import { fallbackSuggestions, giftableProducts, parseBudget } from '../server/giftGuide';
-import { validateSupport, PHOTO_PATH_RE } from '../server/support';
+import { validateSupport, sniffImage } from '../server/support';
 import { productIdsOfOrder } from '../server/purchases';
 import { checkSupportPhoto } from '../services/supportService';
 import { safeNext } from '../storefront/lib/recentlyViewed';
@@ -64,15 +64,16 @@ describe('support validation', () => {
     [{ ...ok, email: 'nope' }, /email/],
     [{ ...ok, type: 'damaged' }, /order number/],
     [{ ...ok, message: '' }, /how we can help/],
-    [{ ...ok, photoPath: 'support/x/photo.gif' }, /photo/]
+    [{ ...ok, withPhoto: 'yes' }, /photo/]
   ])('rejects %#', (b, re) => {
     const r = validateSupport(b);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(re);
   });
   it('photo paths and client-side photo checks', () => {
-    expect(PHOTO_PATH_RE.test('support/0a1b2c3d-1111-4222-8333-444455556666/photo.webp')).toBe(true);
-    expect(PHOTO_PATH_RE.test('support/0a1b2c3d-1111-4222-8333-444455556666/../x.png')).toBe(false);
+    expect(sniffImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg');
+    expect(sniffImage(Buffer.from('RIFF0000WEBPVP8 ', 'latin1'))).toBe('image/webp');
+    expect(sniffImage(Buffer.from('<svg onload=alert(1)>'))).toBeNull();
     expect(checkSupportPhoto({ type: 'image/gif', size: 10 })).toMatch(/JPG/);
     expect(checkSupportPhoto({ type: 'image/png', size: 5 * 1024 * 1024 + 1 })).toMatch(/5 MB/);
     expect(checkSupportPhoto({ type: 'image/jpeg', size: 1000 })).toBeNull();

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { normalizePhone } from '../../lib/checkoutForm';
-import { checkSupportPhoto, uploadSupportPhoto } from '../../services/supportService';
+import { checkSupportPhoto, sendSupportRequest, uploadSupportPhoto } from '../../services/supportService';
 import { Button } from './ui';
 
 const STATUS: Record<string, string> = {
@@ -82,6 +82,7 @@ export const SupportForm: React.FC = () => {
   const [photo, setPhoto] = useState<File | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [state, setState] = useState<'idle' | 'busy' | 'sent'>('idle');
+  const [photoNote, setPhotoNote] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
 
   if (state === 'sent') {
@@ -89,6 +90,7 @@ export const SupportForm: React.FC = () => {
       <div className="glass" role="status" style={{ padding: 'clamp(28px, 4vw, 48px)', maxWidth: 920, margin: '0 auto', textAlign: 'center' }}>
         <p className="script" style={{ fontSize: 40, margin: 0 }}>Thank you</p>
         <p style={{ color: 'var(--color-muted)' }}>We've got your request and will call you back soon.</p>
+        {photoNote && <p style={{ color: '#F3B7AE' }}>{photoNote}</p>}
       </div>
     );
   }
@@ -105,14 +107,14 @@ export const SupportForm: React.FC = () => {
         if (!f.message.trim()) return setErr('Tell us how we can help.');
         setState('busy');
         try {
-          const photoPath = photo ? await uploadSupportPhoto(photo) : undefined;
-          const r = await fetch('/api/support', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type, ...f, orderNumber: f.orderNumber.trim().toUpperCase() || undefined, email: f.email.trim() || undefined, photoPath })
-          });
-          const d = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(d.error || 'We could not send your request.');
+          const d = await sendSupportRequest({ type, ...f, orderNumber: f.orderNumber.trim().toUpperCase() || undefined, email: f.email.trim() || undefined, withPhoto: Boolean(photo) });
+          if (photo && d.uploadTicket) {
+            try {
+              await uploadSupportPhoto(d.id, d.uploadTicket, photo);
+            } catch (pe: any) {
+              setPhotoNote(`Your request was sent, but the photo did not upload (${pe?.message || 'error'}). We'll ask for it when we call.`);
+            }
+          }
           setState('sent');
         } catch (e: any) {
           setErr(e?.message || 'We could not send your request.');

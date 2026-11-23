@@ -14,7 +14,7 @@ import {
 import { runTestHook } from './src/server/testHooks';
 import { rateLimit } from './src/server/rateLimit';
 import { suggestGifts } from './src/server/giftGuide';
-import { lookupOrder, validateSupport, createSupportRequest, notifySupport } from './src/server/support';
+import { lookupOrder, validateSupport, createSupportRequest, notifySupport, attachSupportPhoto, MAX_PHOTO_BYTES } from './src/server/support';
 import { GIFT_GUIDE_MAX_INPUT } from './src/lib/giftGuide';
 import { priceCart, computeTotals, productIdsOf } from './src/server/quote';
 import { loadCoupon } from './src/server/couponService';
@@ -57,6 +57,7 @@ export const limits = {
   newsletter: rateLimit({ name: 'newsletter', windowMs: 60 * 60_000, max: 5 }),
   giftGuide: rateLimit({ name: 'giftGuide', windowMs: 10 * 60_000, max: 20 }),
   support: rateLimit({ name: 'support', windowMs: 60 * 60_000, max: 5 }),
+  supportPhoto: rateLimit({ name: 'supportPhoto', windowMs: 60 * 60_000, max: 10 }),
   orderLookup: rateLimit({ name: 'orderLookup', windowMs: 10 * 60_000, max: 10 }),
   orderView: rateLimit({ name: 'orderView', windowMs: 60_000, max: 60 })
 };
@@ -2055,20 +2056,36 @@ app.post('/api/orders/lookup', limits.orderLookup, async (req: Request, res: Res
   }
 });
 
-/** Call-back / damaged-item requests (optional photo already uploaded to support/{uuid}/). */
+/** Call-back / damaged-item requests. `withPhoto: true` returns a one-time upload ticket. */
 app.post('/api/support', limits.support, async (req: Request, res: Response) => {
   const v = validateSupport(req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
   try {
     const r = await createSupportRequest(v.value);
-    if ('error' in r) return res.status(r.status).json({ error: r.error });
     void notifySupport(r.id, v.value);
-    return res.json({ ok: true, id: r.id });
+    return res.json({ ok: true, ...r });
   } catch (e) {
     console.error('Support request error:', e);
     return res.status(503).json({ error: 'We could not send your request right now. Please try again shortly.' });
   }
 });
+
+/** The photo for a pending support request (raw image body, X-Upload-Ticket header). */
+app.post(
+  '/api/support/:id/photo',
+  limits.supportPhoto,
+  express.raw({ type: () => true, limit: MAX_PHOTO_BYTES + 1 }),
+  async (req: Request, res: Response) => {
+    try {
+      const r = await attachSupportPhoto(req.params.id, req.headers['x-upload-ticket'], req.headers['content-type'], req.body);
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error('Support photo error:', e);
+      return res.status(503).json({ error: 'We could not save the photo right now.' });
+    }
+  }
+);
 
 app.post('/api/newsletter', limits.newsletter, async (req: Request, res: Response) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
