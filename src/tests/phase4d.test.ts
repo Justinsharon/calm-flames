@@ -98,3 +98,33 @@ describe('accounts', () => {
     expect(productIdsOfOrder({ lines: [{ kind: 'product', productId: 'a' }, { kind: 'box', contents: [{ productId: 'b' }, { productId: 'a' }] }], items: [{ productId: 'c' }] }).sort()).toEqual(['a', 'b', 'c']);
   });
 });
+
+describe('golive:check report (pure, read-only)', async () => {
+  const { buildReport, formatReport } = await import('../../scripts/golive/report');
+  const base = {
+    products: [
+      { id: 'a', name: 'Peony', price: 650, priceStatus: 'active', isActive: true },
+      { id: 'b', name: 'Urli', price: 0, priceStatus: 'missing', isActive: true },
+      { id: 'old', name: 'Old', price: 0, priceStatus: 'missing', isActive: false }
+    ],
+    inventory: { a: { availableQuantity: 3, status: 'in_stock' } },
+    settings: null,
+    present: { RAZORPAY_KEY_ID: true },
+    checkoutEnabledEnv: false,
+    admins: 1
+  };
+  it('blocks on unpriced products, missing shipping and missing Razorpay secrets; never shows values', () => {
+    const r = buildReport(base as any);
+    const byArea = Object.fromEntries(r.map((c) => [c.area, c]));
+    expect(byArea.Prices).toMatchObject({ level: 'block', message: '1 of 2 active products have no verified price: Urli.' });
+    expect(byArea.Stock).toMatchObject({ level: 'warn' });
+    expect(byArea.Shipping.level).toBe('block');
+    expect(byArea.Razorpay.message).toBe('Missing: RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET.');
+    expect(formatReport(r)).toMatch(/Not ready: 3 blocking item\(s\)\. Nothing was changed\./);
+  });
+  it('no blocking items once everything is in place', () => {
+    const r = buildReport({ ...base, products: base.products.slice(0, 1), settings: { freeShippingThreshold: 1500, shippingFee: 99 }, present: { RAZORPAY_KEY_ID: true, RAZORPAY_KEY_SECRET: true, RAZORPAY_WEBHOOK_SECRET: true }, publicSiteUrl: 'https://thecalmflames.com', rulesReleases: [{ name: 'cloud.firestore/db', updateTime: '2026-11-20T10:00:00Z' }] } as any);
+    expect(r.filter((c) => c.level === 'block')).toEqual([]);
+    expect(formatReport(r)).toContain('cloud.firestore/db last deployed 2026-11-20T10:00:00Z');
+  });
+});
