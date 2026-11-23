@@ -46,9 +46,12 @@ describe('gift guide fallback', () => {
     const g = giftableProducts(list);
     expect(fallbackSuggestions('a housewarming gift', g)[0].productId).toBe('urli');
     const floral = fallbackSuggestions('for my mother', g)[0];
-    expect(floral).toMatchObject({ productId: 'peony', price: 500, reason: 'Notes of peony, rose.' });
+    expect(floral).toMatchObject({ productId: 'peony', price: 500, reason: 'Peony and rose notes.' });
     expect(fallbackSuggestions('under ₹1,000', g).map((s) => s.productId)).toEqual(['peony']);
     expect(parseBudget('below Rs. 1,500 please')).toBe(1500);
+    const rich = p('jar', { name: 'Lotus Jar', notes: { top: ['lotus'], heart: ['jasmine'], base: ['sandalwood'] } as any, scentFamilySlug: 'floral' as any, collection: 'jar-candles' as any, occasions: ['birthday', 'housewarming'] as any });
+    expect(fallbackSuggestions('housewarming', [rich])[0].reason).toBe('Lotus, jasmine and sandalwood notes, from the Floral family, in our Jar Candles collection. Made for housewarming gifting.');
+    expect(fallbackSuggestions('under 2000', [p('bare', { name: 'Bare' })])[0].reason).toBe('Within your ₹2,000 budget.');
     expect(parseBudget('anything')).toBeNull();
   });
 });
