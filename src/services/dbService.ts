@@ -143,14 +143,23 @@ export async function fetchOrders(customerId?: string): Promise<OrderRecord[]> {
  * Update order status (Admin only)
  */
 /** Owner pastes the courier's tracking link (https only; empty clears it). */
-export async function updateOrderTracking(orderId: string, trackingUrl: string | null): Promise<void> {
+/**
+ * Owner pastes the courier's tracking link (https only; empty clears it). Saved by the server so
+ * the customer's "your order has shipped" email is sent exactly once.
+ */
+export async function updateOrderTracking(orderId: string, trackingUrl: string | null): Promise<{ email?: string }> {
   const url = trackingUrl?.trim() || null;
   if (url && !/^https:\/\/[^\s]+$/.test(url)) throw new Error('Tracking link must start with https://');
-  try {
-    await updateDoc(doc(db, 'orders', orderId), { trackingUrl: url, updatedAt: new Date().toISOString() });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `orders/${orderId}`);
-  }
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error('Please sign in again.');
+  const res = await fetch(`/api/admin/orders/${encodeURIComponent(orderId)}/tracking`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ trackingUrl: url })
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.error || 'Could not save the tracking link.');
+  return d;
 }
 
 export async function updateOrderStatus(

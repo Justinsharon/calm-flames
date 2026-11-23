@@ -20,6 +20,7 @@ import { priceCart, computeTotals, productIdsOf } from './src/server/quote';
 import { loadCoupon } from './src/server/couponService';
 import { newViewToken, hashViewToken, getOrderForViewer } from './src/server/orderView';
 import { afterOrderPlaced } from './src/server/purchases';
+import { setTrackingAndNotify } from './src/server/orderAdmin';
 import { normalizeLines } from './src/lib/cartLines';
 import { validateCustomer, cleanCustomer } from './src/lib/checkoutForm';
 import { confirmOrderPaymentFromVerify, type VerifyTransitionOutcome } from './src/server/orderTransitions';
@@ -1993,6 +1994,31 @@ app.post('/api/gift-guide', limits.giftGuide, async (req: Request, res: Response
     return res.status(503).json(CATALOG_UNAVAILABLE);
   }
   return res.json(await suggestGifts(message, catalog));
+});
+
+/**
+ * Admin saves (or clears) an order's tracking link. The first time a link is saved, the customer
+ * gets one "your order has shipped" email (if a mail provider is configured). Admin ID token only.
+ */
+app.post('/api/admin/orders/:orderNumber/tracking', async (req: Request, res: Response) => {
+  const authz = String(req.headers.authorization || '');
+  if (!authz.startsWith('Bearer ')) return res.status(401).json({ error: 'Authentication required.' });
+  let uid: string;
+  try {
+    uid = (await getAdminAuth(getAdminApp()).verifyIdToken(authz.slice(7))).uid;
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired sign-in token.' });
+  }
+  try {
+    const profile = await getAdminDb().collection('customers').doc(uid).get();
+    if (profile.data()?.role !== 'admin') return res.status(403).json({ error: 'Admin role required.' });
+    const r = await setTrackingAndNotify(req.params.orderNumber, req.body?.trackingUrl);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json(r);
+  } catch (e) {
+    console.error('Tracking update error:', e);
+    return res.status(503).json({ error: 'Could not save the tracking link.' });
+  }
 });
 
 /** Help & Support order tracking: order number AND checkout phone must match (404 otherwise). */

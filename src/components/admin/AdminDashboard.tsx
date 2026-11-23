@@ -627,9 +627,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ isOpen, onClose 
                       onSubmit={async (e) => {
                         e.preventDefault();
                         try {
-                          await updateOrderTracking(selectedOrder.orderId, trackingDraft);
+                          const r = await updateOrderTracking(selectedOrder.orderId, trackingDraft);
                           setSelectedOrder({ ...selectedOrder, trackingUrl: trackingDraft.trim() || null });
-                          setFeedback(`Tracking link ${trackingDraft.trim() ? 'saved' : 'cleared'} for ${selectedOrder.orderId}.`);
+                          const mail = r.email === 'sent' ? ' The customer was emailed.' : r.email === 'skipped' ? ' (No email: mail is not configured.)' : '';
+                          setFeedback(`Tracking link ${trackingDraft.trim() ? 'saved' : 'cleared'} for ${selectedOrder.orderId}.${mail}`);
                           loadAdminData();
                         } catch (err: any) {
                           alert(err.message);
