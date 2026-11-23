@@ -29,6 +29,7 @@ import { expireAbandonedOrders, resolveOrderMaxAgeMinutes } from './src/server/o
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import fs from 'fs';
 import { resolveMeta, injectMeta } from './src/server/seo';
+import { noindexOutsidePublicHost, isPublicHost, publicOrigin, robotsTxt, sitemapXml, sitemapEntries } from './src/server/siteIndex';
 import { getAdminApp } from './src/server/firestoreAdmin';
 import { getAdminDb, doc, getDoc, runTransaction } from './src/server/firestoreAdmin';
 
@@ -59,6 +60,26 @@ export const limits = {
   orderLookup: rateLimit({ name: 'orderLookup', windowMs: 10 * 60_000, max: 10 }),
   orderView: rateLimit({ name: 'orderView', windowMs: 60_000, max: 60 })
 };
+
+// Only the public host (PUBLIC_SITE_URL) may be indexed; staging and *.run.app never are.
+app.use(noindexOutsidePublicHost);
+
+app.get('/robots.txt', (req: Request, res: Response) => {
+  res.type('text/plain').setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(robotsTxt(isPublicHost(req.headers.host), publicOrigin()));
+});
+
+app.get('/sitemap.xml', async (req: Request, res: Response) => {
+  const origin = publicOrigin();
+  if (!origin || !isPublicHost(req.headers.host)) return res.status(404).type('text/plain').send('Not found');
+  try {
+    res.type('application/xml').setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(sitemapXml(origin, await sitemapEntries()));
+  } catch (e) {
+    console.error('Sitemap error:', e);
+    return res.status(503).type('text/plain').send('Sitemap unavailable');
+  }
+});
 
 app.use(
   express.json({
@@ -2180,8 +2201,9 @@ async function startServer() {
     // Every non-API GET gets the SPA, with that URL's title/description (404 status if unknown).
     app.get('*', async (req, res) => {
       const meta = await resolveMeta(req.path);
+      const origin = publicOrigin();
       res.status(meta.status).setHeader('Cache-Control', 'no-cache');
-      res.type('html').send(injectMeta(template, meta));
+      res.type('html').send(injectMeta(template, meta, { canonicalUrl: origin ? origin + (req.path === '/' ? '/' : req.path.replace(/\/+$/, '')) : undefined }));
     });
   } else {
     const { createServer: createViteServer } = await import('vite');

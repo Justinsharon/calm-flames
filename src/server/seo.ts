@@ -5,6 +5,7 @@
  */
 import { matchRoute, pageTitle, metaDescription, INFO_PAGE_TITLES, type InfoPageSlug, DEFAULT_DESCRIPTION } from '../lib/routes';
 import { getAdminDb } from './firestoreAdmin';
+import { productJsonLd } from './siteIndex';
 import { productFromDoc, isActiveProduct } from '../lib/productMapping';
 import { pageFromDoc } from '../lib/pages';
 import { TAXONOMY_SEED_NAMES, isOneOf, COLLECTION_SLUGS, SCENT_FAMILY_SLUGS, OCCASION_SLUGS, type TaxonomyKind } from '../lib/taxonomy';
@@ -14,6 +15,8 @@ export interface PageMeta {
   title: string;
   description: string;
   image?: string;
+  /** Set on product pages (for JSON-LD). */
+  product?: import('../types').Product;
 }
 
 export function escapeHtml(s: string): string {
@@ -21,7 +24,7 @@ export function escapeHtml(s: string): string {
 }
 
 /** Replace title/description/og tags in the built index.html (pure). */
-export function injectMeta(template: string, meta: PageMeta): string {
+export function injectMeta(template: string, meta: PageMeta, opts: { canonicalUrl?: string } = {}): string {
   const t = escapeHtml(meta.title);
   const d = escapeHtml(meta.description);
   let html = template
@@ -31,6 +34,22 @@ export function injectMeta(template: string, meta: PageMeta): string {
     .replace(/<meta property="og:description" content="[^"]*"\s*\/?>/, `<meta property="og:description" content="${d}" />`);
   if (meta.image && /^https?:\/\//.test(meta.image)) {
     html = html.replace('</head>', `    <meta property="og:image" content="${escapeHtml(meta.image)}" />\n  </head>`);
+  }
+  if (opts.canonicalUrl && meta.status === 200) {
+    const c = escapeHtml(opts.canonicalUrl);
+    html = html.replace('</head>', `    <link rel="canonical" href="${c}" />\n    <meta property="og:url" content="${c}" />\n  </head>`);
+  }
+  if (meta.product && meta.status === 200) {
+    const ld = productJsonLd(meta.product, opts.canonicalUrl || '');
+    if (ld) {
+      if (!opts.canonicalUrl) {
+        delete ld.url;
+        delete (ld.offers as any).url;
+      }
+      // JSON inside <script>: escape "<" so no value can close the tag.
+      const json = JSON.stringify(ld).replace(/</g, '\\u003c');
+      html = html.replace('</head>', `    <script type="application/ld+json">${json}</script>\n  </head>`);
+    }
   }
   return html;
 }
@@ -71,7 +90,7 @@ export async function resolveMeta(pathname: string): Promise<PageMeta> {
         if (!snap) return notFound;
         const p = productFromDoc(snap.id, snap.data()!);
         if (!isActiveProduct(p)) return notFound;
-        return { status: 200, title: pageTitle(p.name), description: metaDescription(p.shortDescription || p.description || p.tagline), image: p.image || undefined };
+        return { status: 200, title: pageTitle(p.name), description: metaDescription(p.shortDescription || p.description || p.tagline), image: p.image || undefined, product: p };
       }
       case 'collection':
         return taxonomyMeta('collections', m.params.slug, COLLECTION_SLUGS, ' collection');
