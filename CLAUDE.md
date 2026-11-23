@@ -17,18 +17,21 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
 - Commit in small, described steps. Do not push to `main` without the owner asking.
 
 ## Known critical issues (audit, Nov 2026)
-1. `npm install` fails: `esbuild@^0.25` conflicts with Vite 8 (needs ^0.27). Bun works; npm must work for Cloud Run.
-2. Server uses the **client** Firebase SDK unauthenticated; Firestore rules deny its order/inventory writes.
-   Must move to `firebase-admin` with a service account / Cloud Run default credentials.
+1. ~~`npm install` fails (esbuild vs Vite 8).~~ Fixed in Phase 1 (`esbuild ^0.27`; Dockerfile uses `npm ci`).
+2. ~~Server uses the client Firebase SDK.~~ Fixed in Phase 1 (`src/server/firestoreAdmin.ts`, firebase-admin + ADC).
 3. ~~Storefront reads static product data.~~ Fixed in Phase 3 (`CatalogContext`, realtime Firestore).
 4. ~~Server validates prices against the static catalogue.~~ Fixed in Phase 3 (`src/server/catalogService.ts`).
 5. ~~Product images bundled; admin cannot upload photos.~~ Fixed in Phase 3 (Storage + admin upload).
    One image stays bundled as the decorative home hero (`src/data/siteContent.ts`).
 6. 33 of 37 products unpriced (owner to fill in Firebase).
 7. ~~`App.tsx` seeds the catalogue on every visitor load.~~ Fixed in Phase 3 (`scripts/migrate-catalog.ts`).
-8. Phase 1.2.2 gaps in `server.ts`: `payment.failed` skips amount/currency checks when absent (~L1244, ~L1446);
-   orphaned mapping `setDoc` outside a transaction (~L556); unfenced fallback `updateDoc` (~L570, ~L575).
-9. 6 tests time out hitting live Firestore; concurrency tests assert validation, not final DB state.
+8. ~~Phase 1.2.2 gaps (payment.failed amount/currency, orphan mapping, unfenced fallback writes).~~ Fixed in
+   Phase 2; re-verified in Phase 4f: missing amount/currency → Razorpay API check or reconciliation
+   (`server.ts` webhook), `recordOrphanMapping` is transactional and never overwrites, all failure writes go
+   through `failAttemptFenced`, no client-SDK `updateDoc` left in `server.ts`. Tests:
+   `payments_concurrency.emulator.test.ts` (gap 1, orphan mapping, fencing).
+9. ~~Tests hit live Firestore; concurrency tests asserted validation only.~~ Fixed in Phase 1/2: unit tests run with
+   `FIRESTORE_DISABLED=1` (no network); emulator suites assert final order/event/inventory state.
 10. ~~Admin email hard-coded.~~ Fixed in Phase 3: role from `customers/{uid}.role` (+ `admin` claim for Storage).
 11. ~~`/api/payments/verify` writes order status without the claim check.~~ Fixed in Phase 3b
     (`src/server/orderTransitions.ts`: one transaction re-checks order state + creation claim).
@@ -72,6 +75,12 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
   Admin → Support; optional `SUPPORT_NOTIFY_EMAIL`. Reviews: verified buyers only (server-written
   `customers/{uid}/purchases`), pending until approved. Rewards, rituals, moodInteractions, analyticsEvents
   removed; per-IP rate limits on public POSTs (`src/server/rateLimit.ts`; tests set `RATE_LIMIT_DISABLED=1`).
+- **Phase 4f — Go-live prep (on `phase-4f-go-live`):** production service `calm-flames` + domain + second
+  scheduler job + daily backups (`docs/deploy.md` §6, `docs/backups.md`); `npm run golive:check` (read-only).
+  SEO: `/robots.txt`, `/sitemap.xml`, canonical + product JSON-LD; only `PUBLIC_SITE_URL`'s host is indexable
+  (everything else `noindex`; www → apex 301). Emails once per order: confirmation, `ORDER_NOTIFY_EMAIL` alert,
+  "shipped" on the first tracking link (`POST /api/admin/orders/:id/tracking`). Support photos are uploaded
+  through the server with a one-time ticket (`POST /api/support/:id/photo`); clients cannot write `support/`.
 - **Phase 4 — Go live:** owner enters prices/photos/settings in Firebase; owner sets Razorpay env vars +
   webhook; test payment; enable checkout; deploy to Cloud Run; point thecalmflames.com.
 - **Later:** UI polish.
@@ -86,6 +95,7 @@ Target hosting: Google Cloud Run (same Google project as Firebase).
   (steps: `docs/catalog-migration.md`) · Rules deploy uses `firebase.deploy.json` (named database)
 - Catalogue import: `npm run import:catalog -- <file.xlsx|.csv> [--photos <dir>] [--apply]` (dry run by default)
 - Taxonomy seed (create-only): `npm run seed:taxonomy`
+- Go-live readiness (read-only): `npm run golive:check [-- --url https://…]`
 - Maintenance sweep: `npm run expire-reservations` (also `POST /api/admin/maintenance/expire-reservations`)
 - Real checkout additionally requires `CHECKOUT_ENABLED=true` (Phase 4 only) and shipping set in `settings/store`.
 - Env: copy `.env.example` → `.env.local`.

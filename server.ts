@@ -29,7 +29,7 @@ import { expireAbandonedOrders, resolveOrderMaxAgeMinutes } from './src/server/o
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import fs from 'fs';
 import { resolveMeta, injectMeta } from './src/server/seo';
-import { noindexOutsidePublicHost, isPublicHost, publicOrigin, robotsTxt, sitemapXml, sitemapEntries } from './src/server/siteIndex';
+import { redirectWwwToApex, noindexOutsidePublicHost, requestHost, isPublicHost, publicOrigin, robotsTxt, sitemapXml, sitemapEntries } from './src/server/siteIndex';
 import { getAdminApp } from './src/server/firestoreAdmin';
 import { getAdminDb, doc, getDoc, runTransaction } from './src/server/firestoreAdmin';
 
@@ -63,16 +63,17 @@ export const limits = {
 };
 
 // Only the public host (PUBLIC_SITE_URL) may be indexed; staging and *.run.app never are.
+app.use(redirectWwwToApex);
 app.use(noindexOutsidePublicHost);
 
 app.get('/robots.txt', (req: Request, res: Response) => {
   res.type('text/plain').setHeader('Cache-Control', 'public, max-age=3600');
-  res.send(robotsTxt(isPublicHost(req.headers.host), publicOrigin()));
+  res.send(robotsTxt(isPublicHost(requestHost(req)), publicOrigin()));
 });
 
 app.get('/sitemap.xml', async (req: Request, res: Response) => {
   const origin = publicOrigin();
-  if (!origin || !isPublicHost(req.headers.host)) return res.status(404).type('text/plain').send('Not found');
+  if (!origin || !isPublicHost(requestHost(req))) return res.status(404).type('text/plain').send('Not found');
   try {
     res.type('application/xml').setHeader('Cache-Control', 'public, max-age=3600');
     return res.send(sitemapXml(origin, await sitemapEntries()));

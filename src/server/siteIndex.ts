@@ -28,8 +28,26 @@ export function isPublicHost(hostHeader: string | undefined, env: NodeJS.Process
   return new URL(origin).host.toLowerCase() === hostHeader.toLowerCase();
 }
 
+/**
+ * The host the visitor used. Behind Firebase Hosting the custom domain arrives in
+ * X-Forwarded-Host; directly on Cloud Run it is Host. (A client can spoof X-Forwarded-Host on the
+ * run.app URL, but that only changes its own response; crawlers never send it.)
+ */
+export function requestHost(req: Pick<Request, 'headers'>): string {
+  const fwd = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  return (fwd || String(req.headers.host || '')).toLowerCase();
+}
+
+/** www.<public host> → 301 to the public apex (same path and query). */
+export function redirectWwwToApex(req: Request, res: Response, next: NextFunction) {
+  const origin = publicOrigin();
+  const host = requestHost(req);
+  if (origin && host === `www.${new URL(origin).host.toLowerCase()}`) return res.redirect(301, origin + req.originalUrl);
+  next();
+}
+
 export function noindexOutsidePublicHost(req: Request, res: Response, next: NextFunction) {
-  if (!isPublicHost(req.headers.host)) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  if (!isPublicHost(requestHost(req))) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   next();
 }
 

@@ -99,6 +99,21 @@ describe('SEO: only the public host is indexable', () => {
     expect((await request(app).get('/robots.txt').set('Host', PUBLIC)).text).toBe('User-agent: *\nDisallow: /\n');
   });
 
+  it('www redirects permanently to the apex, keeping path and query', async () => {
+    const r = await request(app).get('/products/peony-bloom?ref=ig').set('Host', `www.${PUBLIC}`);
+    expect(r.status).toBe(301);
+    expect(r.headers.location).toBe('https://thecalmflames.com/products/peony-bloom?ref=ig');
+    expect((await request(app).get('/robots.txt').set('Host', PUBLIC)).status).toBe(200);
+  });
+
+  it('behind Firebase Hosting the custom domain arrives as X-Forwarded-Host', async () => {
+    const r = await request(app).get('/robots.txt').set('Host', 'calm-flames-abc-el.a.run.app').set('X-Forwarded-Host', PUBLIC);
+    expect(r.text).toContain('Sitemap:');
+    expect(r.headers['x-robots-tag']).toBeUndefined();
+    const w = await request(app).get('/').set('Host', 'calm-flames-abc-el.a.run.app').set('X-Forwarded-Host', `www.${PUBLIC}`);
+    expect(w.status).toBe(301);
+  });
+
   it('every response off the public host carries X-Robots-Tag: noindex (APIs too)', async () => {
     const r = await request(app).get('/api/checkout/readiness').set('Host', 'staging.example.run.app');
     expect(r.headers['x-robots-tag']).toBe('noindex, nofollow');
